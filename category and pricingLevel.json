@@ -1,0 +1,1897 @@
+[
+ {
+  "_id": "nodes/14064086",
+  "category": "Jewellery and Watches",
+  "pricingLevel": 1
+ },
+ {
+  "_id": "nodes/14064088",
+  "category": "Fashion",
+  "pricingLevel": 3
+ },
+ {
+  "_id": "nodes/14064094",
+  "category": "Fashion",
+  "pricingLevel": 1
+ },
+ {
+  "_id": "nodes/14064096",
+  "category": "Electronics and Communication",
+  "pricingLevel": 1
+ },
+ {
+  "_id": "nodes/14064101",
+  "category": "Fashion",
+  "pricingLevel": 1
+ },
+ {
+  "_id": "nodes/14064098",
+  "category": "Home",
+  "pricingLevel": 2
+ },
+ {
+  "_id": "nodes/14064103",
+  "category": "Footwear",
+  "pricingLevel": 3
+ },
+ {
+  "_id": "nodes/14064105",
+  "category": "Footwear",
+  "pricingLevel": 2
+ },
+ {
+  "_id": "nodes/14064111",
+  "category": "Footwear",
+  "pricingLevel": 2
+ },
+ {
+  "_id": "nodes/14064121",
+  "category": "Jewellery and Watches",
+  "pricingLevel": 3
+ },
+ {
+  "_id": "nodes/14064123",
+  "category": "Jewellery and Watches",
+  "pricingLevel": 3
+ },
+ {
+  "_id": "nodes/14064125",
+  "category": "Fashion",
+  "pricingLevel": 3
+ },
+ {
+  "_id": "nodes/14064127",
+  "category": "Fashion",
+  "pricingLevel": 2
+ },
+ {
+  "_id": "nodes/14064131",
+  "category": "Fashion",
+  "pricingLevel": 2
+ },
+ {
+  "_id": "nodes/14064058",
+  "category": "Hypermarket",
+  "pricingLevel": 2
+ },
+ {
+  "_id": "nodes/14064060",
+  "category": "Fashion",
+  "pricingLevel": 2
+ },
+ {
+  "_id": "nodes/14064062",
+  "category": "Fashion",
+  "pricingLevel": 3
+ },
+ {
+  "_id": "nodes/14064064",
+  "category": "Fashion",
+  "pricingLevel": 2
+ },
+ {
+  "_id": "nodes/14064066",
+  "category": "Fashion",
+  "pricingLevel": 2
+ },
+ {
+  "_id": "nodes/14066288",
+  "category": "Fashion",
+  "pricingLevel": 2
+ },
+ {
+  "_id": "nodes/14066286",
+  "category": "Jewellery and Watches",
+  "pricingLevel": 3
+ },
+ {
+  "_id": "nodes/14066284",
+  "category": "Beauty and Cosmetics",
+  "pricingLevel": 3
+ },
+ {
+  "_id": "nodes/14066282",
+  "category": "Jewellery and Watches",
+  "pricingLevel": 2
+ },
+ {
+  "_id": "nodes/14066280",
+  "category": "Jewellery and Watches",
+  "pricingLevel": 2
+ },
+ {
+  "_id": "nodes/14066278",
+  "category": "Beauty and Cosmetics",
+  "pricingLevel": 2
+ },
+ {
+  "_id": "nodes/14066276",
+  "category": "Footwear",
+  "pricingLevel": 2
+ },
+ {
+  "_id": "nodes/14066270",
+  "category": "Electronics and Communication",
+  "pricingLevel": 2
+ },
+ {
+  "_id": "nodes/14067288",
+  "category": "Electronics and Communication",
+  "pricingLevel": 3
+ },
+ {
+  "_id": "nodes/14066290",
+  "category": "Fashion",
+  "pricingLevel": 2
+ },
+ {
+  "_id": "nodes/14067282",
+  "category": "Fashion",
+  "pricingLevel": 3
+ },
+ {
+  "_id": "nodes/14064133",
+  "category": "Fashion",
+  "pricingLevel": 2
+ },
+ {
+  "_id": "nodes/14067280",
+  "category": "Footwear",
+  "pricingLevel": 2
+ },
+ {
+  "_id": "nodes/14064135",
+  "category": "Fashion",
+  "pricingLevel": 1
+ },
+ {
+  "_id": "nodes/14064137",
+  "category": "Fashion",
+  "pricingLevel": 2
+ },
+ {
+  "_id": "nodes/14067278",
+  "category": "Fashion",
+  "pricingLevel": 3
+ },
+ {
+  "_id": "nodes/14067276",
+  "category": "Fashion",
+  "pricingLevel": 2
+ },
+ {
+  "_id": "nodes/14066251",
+  "category": "Fashion",
+  "pricingLevel": 2
+ },
+ {
+  "_id": "nodes/14066260",
+  "category": "Fashion",
+  "pricingLevel": 2
+ },
+ {
+  "_id": "nodes/14067274",
+  "category": "Fashion",
+  "pricingLevel": 2
+ },
+ {
+  "_id": "nodes/14066262",
+  "category": "Fashion",
+  "pricingLevel": 3
+ },
+ {
+  "_id": "nodes/14066264",
+  "category": "Jewellery and Watches",
+  "pricingLevel": 3
+ },
+ {
+  "_id": "nodes/14067272",
+  "category": "Jewellery and Watches",
+  "pricingLevel": 2
+ },
+ {
+  "_id": "nodes/14066268",
+  "category": "Fashion",
+  "pricingLevel": 2
+ },
+ {
+  "_id": "nodes/14067266",
+  "category": "Gifts, Books, Toys , and music",
+  "pricingLevel": 1
+ },
+ {
+  "_id": "nodes/14066258",
+  "category": "Fashion",
+  "pricingLevel": 2
+ },
+ {
+  "_id": "nodes/14067321",
+  "category": "Fashion",
+  "pricingLevel": 2
+ },
+ {
+  "_id": "nodes/14067319",
+  "category": "Gifts, Books, Toys , and music",
+  "pricingLevel": 2
+ },
+ {
+  "_id": "nodes/14067317",
+  "category": "Bags and Footwear",
+  "pricingLevel": 3
+ },
+ {
+  "_id": "nodes/14067315",
+  "category": "Fashion",
+  "pricingLevel": 2
+ },
+ {
+  "_id": "nodes/14067313",
+  "category": "Footwear",
+  "pricingLevel": 2
+ },
+ {
+  "_id": "nodes/14067311",
+  "category": "Fashion",
+  "pricingLevel": 3
+ },
+ {
+  "_id": "nodes/14067309",
+  "category": "Bags and Footwear",
+  "pricingLevel": 3
+ },
+ {
+  "_id": "nodes/14067307",
+  "category": "Fashion",
+  "pricingLevel": 2
+ },
+ {
+  "_id": "nodes/14067299",
+  "category": "Jewellery and Watches",
+  "pricingLevel": 2
+ },
+ {
+  "_id": "nodes/14067297",
+  "category": "Footwear",
+  "pricingLevel": 2
+ },
+ {
+  "_id": "nodes/14067295",
+  "category": "Jewellery and Watches",
+  "pricingLevel": 2
+ },
+ {
+  "_id": "nodes/14067293",
+  "category": "Fashion",
+  "pricingLevel": 2
+ },
+ {
+  "_id": "nodes/14067290",
+  "category": "Fashion",
+  "pricingLevel": 2
+ },
+ {
+  "_id": "nodes/14064068",
+  "category": "Footwear",
+  "pricingLevel": 2
+ },
+ {
+  "_id": "nodes/14544991",
+  "category": "Jewellery and Watches",
+  "pricingLevel": 3
+ },
+ {
+  "_id": "nodes/14545011",
+  "category": "Jewellery and Watches",
+  "pricingLevel": 2
+ },
+ {
+  "_id": "nodes/14551812",
+  "category": "Food and Beverages",
+  "pricingLevel": 1
+ },
+ {
+  "_id": "nodes/14551814",
+  "category": "Food and Beverages",
+  "pricingLevel": 2
+ },
+ {
+  "_id": "nodes/14551816",
+  "category": "Food and Beverages",
+  "pricingLevel": 2
+ },
+ {
+  "_id": "nodes/14551818",
+  "category": "Food and Beverages",
+  "pricingLevel": 2
+ },
+ {
+  "_id": "nodes/14551822",
+  "category": "Food and Beverages",
+  "pricingLevel": 2
+ },
+ {
+  "_id": "nodes/14551824",
+  "category": "Food and Beverages",
+  "pricingLevel": 1
+ },
+ {
+  "_id": "nodes/14551826",
+  "category": "Food and Beverages",
+  "pricingLevel": 2
+ },
+ {
+  "_id": "nodes/14551856",
+  "category": "Food and Beverages",
+  "pricingLevel": 2
+ },
+ {
+  "_id": "nodes/14551858",
+  "category": "Entertainment",
+  "pricingLevel": 2
+ },
+ {
+  "_id": "nodes/14551861",
+  "category": "Entertainment",
+  "pricingLevel": 2
+ },
+ {
+  "_id": "nodes/14551863",
+  "category": "Home",
+  "pricingLevel": 1
+ },
+ {
+  "_id": "nodes/14544955",
+  "category": "Fashion",
+  "pricingLevel": 3
+ },
+ {
+  "_id": "nodes/14544957",
+  "category": "Fashion",
+  "pricingLevel": 2
+ },
+ {
+  "_id": "nodes/14544959",
+  "category": "Fashion",
+  "pricingLevel": 2
+ },
+ {
+  "_id": "nodes/14544961",
+  "category": "Fashion",
+  "pricingLevel": 3
+ },
+ {
+  "_id": "nodes/14544963",
+  "category": "Fashion",
+  "pricingLevel": 3
+ },
+ {
+  "_id": "nodes/14544966",
+  "category": "Fashion",
+  "pricingLevel": 3
+ },
+ {
+  "_id": "nodes/14544977",
+  "category": "Fashion",
+  "pricingLevel": 2
+ },
+ {
+  "_id": "nodes/14544979",
+  "category": "Fashion",
+  "pricingLevel": 2
+ },
+ {
+  "_id": "nodes/14544981",
+  "category": "Fashion",
+  "pricingLevel": 2
+ },
+ {
+  "_id": "nodes/14544985",
+  "category": "Footwear",
+  "pricingLevel": 3
+ },
+ {
+  "_id": "nodes/14544987",
+  "category": "Footwear",
+  "pricingLevel": 2
+ },
+ {
+  "_id": "nodes/14544989",
+  "category": "Fashion",
+  "pricingLevel": 3
+ },
+ {
+  "_id": "nodes/14544921",
+  "category": "Footwear",
+  "pricingLevel": 2
+ },
+ {
+  "_id": "nodes/14544923",
+  "category": "Lingerie",
+  "pricingLevel": 2
+ },
+ {
+  "_id": "nodes/14544925",
+  "category": "Fashion",
+  "pricingLevel": 3
+ },
+ {
+  "_id": "nodes/14544927",
+  "category": "Fashion",
+  "pricingLevel": 2
+ },
+ {
+  "_id": "nodes/14064129",
+  "category": "Fashion",
+  "pricingLevel": 2
+ },
+ {
+  "_id": "nodes/14544929",
+  "category": "Fashion",
+  "pricingLevel": 2
+ },
+ {
+  "_id": "nodes/14544931",
+  "category": "Fashion",
+  "pricingLevel": 2
+ },
+ {
+  "_id": "nodes/14544935",
+  "category": "Fashion",
+  "pricingLevel": 3
+ },
+ {
+  "_id": "nodes/14544941",
+  "category": "Fashion",
+  "pricingLevel": 3
+ },
+ {
+  "_id": "nodes/14544943",
+  "category": "Fashion",
+  "pricingLevel": 2
+ },
+ {
+  "_id": "nodes/14544945",
+  "category": "Fashion",
+  "pricingLevel": 3
+ },
+ {
+  "_id": "nodes/14544947",
+  "category": "Fashion",
+  "pricingLevel": 2
+ },
+ {
+  "_id": "nodes/14544951",
+  "category": "Fashion",
+  "pricingLevel": 2
+ },
+ {
+  "_id": "nodes/14544953",
+  "category": "Fashion",
+  "pricingLevel": 2
+ },
+ {
+  "_id": "nodes/14545061",
+  "category": "Eyewear",
+  "pricingLevel": 2
+ },
+ {
+  "_id": "nodes/14545065",
+  "category": "Jewellery and Watches",
+  "pricingLevel": 3
+ },
+ {
+  "_id": "nodes/14545067",
+  "category": "Beauty and Cosmetics",
+  "pricingLevel": 2
+ },
+ {
+  "_id": "nodes/14545069",
+  "category": "Food and Beverages",
+  "pricingLevel": 2
+ },
+ {
+  "_id": "nodes/14545071",
+  "category": "Beauty and Cosmetics",
+  "pricingLevel": 2
+ },
+ {
+  "_id": "nodes/14545073",
+  "category": "Beauty and Cosmetics",
+  "pricingLevel": 2
+ },
+ {
+  "_id": "nodes/14545075",
+  "category": "Beauty and Cosmetics",
+  "pricingLevel": 2
+ },
+ {
+  "_id": "nodes/14545077",
+  "category": "Beauty and Cosmetics",
+  "pricingLevel": 3
+ },
+ {
+  "_id": "nodes/14651253",
+  "category": "Accessories",
+  "pricingLevel": 2
+ },
+ {
+  "_id": "nodes/14545084",
+  "category": "Beauty and Cosmetics",
+  "pricingLevel": 2
+ },
+ {
+  "_id": "nodes/14545092",
+  "category": "Accessories",
+  "pricingLevel": 2
+ },
+ {
+  "_id": "nodes/14545094",
+  "category": "Beauty and Cosmetics",
+  "pricingLevel": 3
+ },
+ {
+  "_id": "nodes/14545096",
+  "category": "Beauty and Cosmetics",
+  "pricingLevel": 2
+ },
+ {
+  "_id": "nodes/14545098",
+  "category": "Fashion",
+  "pricingLevel": 2
+ },
+ {
+  "_id": "nodes/14545047",
+  "category": "Beauty and Cosmetics",
+  "pricingLevel": 2
+ },
+ {
+  "_id": "nodes/14545049",
+  "category": "Gifts, Books, Toys , and music",
+  "pricingLevel": 3
+ },
+ {
+  "_id": "nodes/14545051",
+  "category": "Food and Beverages",
+  "pricingLevel": 2
+ },
+ {
+  "_id": "nodes/14545053",
+  "category": "Fashion (Lingerie)",
+  "pricingLevel": 2
+ },
+ {
+  "_id": "nodes/14545055",
+  "category": "Jewellery and Watches",
+  "pricingLevel": 3
+ },
+ {
+  "_id": "nodes/14545057",
+  "category": "Jewellery and Watches",
+  "pricingLevel": 3
+ },
+ {
+  "_id": "nodes/14545059",
+  "category": "Fashion (Footwear)",
+  "pricingLevel": 2
+ },
+ {
+  "_id": "nodes/14545001",
+  "category": "Jewellery and Watches",
+  "pricingLevel": 3
+ },
+ {
+  "_id": "nodes/14544993",
+  "category": "Fashion",
+  "pricingLevel": 2
+ },
+ {
+  "_id": "nodes/14545044",
+  "category": "Jewellery and Watches",
+  "pricingLevel": 3
+ },
+ {
+  "_id": "nodes/14545042",
+  "category": "Fashion",
+  "pricingLevel": 2
+ },
+ {
+  "_id": "nodes/14545040",
+  "category": "Fashion",
+  "pricingLevel": 3
+ },
+ {
+  "_id": "nodes/14544933",
+  "category": "Fashion",
+  "pricingLevel": 3
+ },
+ {
+  "_id": "nodes/14545037",
+  "category": "Fashion (Leather Goods)",
+  "pricingLevel": 2
+ },
+ {
+  "_id": "nodes/14545035",
+  "category": "Fashion",
+  "pricingLevel": 2
+ },
+ {
+  "_id": "nodes/14545033",
+  "category": "Food and Beverages",
+  "pricingLevel": 2
+ },
+ {
+  "_id": "nodes/14545027",
+  "category": "Beauty and Cosmetics",
+  "pricingLevel": 2
+ },
+ {
+  "_id": "nodes/14545025",
+  "category": "Beauty and Cosmetics",
+  "pricingLevel": 3
+ },
+ {
+  "_id": "nodes/14545023",
+  "category": "Fashion",
+  "pricingLevel": 3
+ },
+ {
+  "_id": "nodes/14545021",
+  "category": "Hypermarket",
+  "pricingLevel": 3
+ },
+ {
+  "_id": "nodes/14545019",
+  "category": "Fashion",
+  "pricingLevel": 2
+ },
+ {
+  "_id": "nodes/14545017",
+  "category": "Fashion",
+  "pricingLevel": 2
+ },
+ {
+  "_id": "nodes/14545015",
+  "category": "Eyewear",
+  "pricingLevel": 3
+ },
+ {
+  "_id": "nodes/14545013",
+  "category": "Beauty and Cosmetics",
+  "pricingLevel": 2
+ },
+ {
+  "_id": "nodes/14545009",
+  "category": "Jewellery and Watches",
+  "pricingLevel": 3
+ },
+ {
+  "_id": "nodes/14545007",
+  "category": "Fashion",
+  "pricingLevel": 2
+ },
+ {
+  "_id": "nodes/14544995",
+  "category": "Fashion",
+  "pricingLevel": 3
+ },
+ {
+  "_id": "nodes/14548646",
+  "category": "Food and Beverages",
+  "pricingLevel": 2
+ },
+ {
+  "_id": "nodes/14544975",
+  "category": "Fashion",
+  "pricingLevel": 1
+ },
+ {
+  "_id": "nodes/14544983",
+  "category": "Fashion",
+  "pricingLevel": 2
+ },
+ {
+  "_id": "nodes/14548644",
+  "category": "Hypermarket",
+  "pricingLevel": 1
+ },
+ {
+  "_id": "nodes/14674927",
+  "category": "Food and Beverages",
+  "pricingLevel": 2
+ },
+ {
+  "_id": "nodes/14072314",
+  "category": "Food and Beverages",
+  "pricingLevel": 2
+ },
+ {
+  "_id": "nodes/14072327",
+  "category": "Food and Beverages",
+  "pricingLevel": 2
+ },
+ {
+  "_id": "nodes/14072325",
+  "category": "Food and Beverages",
+  "pricingLevel": 1
+ },
+ {
+  "_id": "nodes/14072323",
+  "category": "Food and Beverages",
+  "pricingLevel": 1
+ },
+ {
+  "_id": "nodes/14072319",
+  "category": "Food and Beverages",
+  "pricingLevel": 1
+ },
+ {
+  "_id": "nodes/14072316",
+  "category": "Food and Beverages",
+  "pricingLevel": 2
+ },
+ {
+  "_id": "nodes/14071191",
+  "category": "Food and Beverages",
+  "pricingLevel": 2
+ },
+ {
+  "_id": "nodes/14072952",
+  "category": "Fashion",
+  "pricingLevel": 2
+ },
+ {
+  "_id": "nodes/14072954",
+  "category": "Fashion",
+  "pricingLevel": 2
+ },
+ {
+  "_id": "nodes/14072958",
+  "category": "Fashion",
+  "pricingLevel": 2
+ },
+ {
+  "_id": "nodes/14072960",
+  "category": "Fashion",
+  "pricingLevel": 2
+ },
+ {
+  "_id": "nodes/14072962",
+  "category": "Fashion",
+  "pricingLevel": 2
+ },
+ {
+  "_id": "nodes/14072964",
+  "category": "Beauty and Cosmetics",
+  "pricingLevel": 3
+ },
+ {
+  "_id": "nodes/14072966",
+  "category": "Services",
+  "pricingLevel": 2
+ },
+ {
+  "_id": "nodes/14072973",
+  "category": "Hypermarket",
+  "pricingLevel": 2
+ },
+ {
+  "_id": "nodes/14072978",
+  "category": "Gifts, Books, Toys , and music",
+  "pricingLevel": 2
+ },
+ {
+  "_id": "nodes/14072980",
+  "category": "Food and Beverages",
+  "pricingLevel": 2
+ },
+ {
+  "_id": "nodes/14072982",
+  "category": "Home",
+  "pricingLevel": 2
+ },
+ {
+  "_id": "nodes/14072984",
+  "category": "Food and Beverages",
+  "pricingLevel": 2
+ },
+ {
+  "_id": "nodes/14072986",
+  "category": "Food and Beverages",
+  "pricingLevel": 3
+ },
+ {
+  "_id": "nodes/14072947",
+  "category": "Fashion",
+  "pricingLevel": 2
+ },
+ {
+  "_id": "nodes/14072950",
+  "category": "Hypermarket",
+  "pricingLevel": 2
+ },
+ {
+  "_id": "nodes/14551820",
+  "category": "Gifts, Books, Toys , and music",
+  "pricingLevel": 2
+ },
+ {
+  "_id": "nodes/14071258",
+  "category": "Food and Beverages",
+  "pricingLevel": 2
+ },
+ {
+  "_id": "nodes/15125218",
+  "category": "Fashion",
+  "pricingLevel": 2
+ },
+ {
+  "_id": "nodes/15133072",
+  "category": "Fashion",
+  "pricingLevel": 1
+ },
+ {
+  "_id": "nodes/15133073",
+  "category": "Fashion",
+  "pricingLevel": 1
+ },
+ {
+  "_id": "nodes/15133074",
+  "category": "Fashion",
+  "pricingLevel": 2
+ },
+ {
+  "_id": "nodes/15133075",
+  "category": "Fashion",
+  "pricingLevel": 2
+ },
+ {
+  "_id": "nodes/15133081",
+  "category": "Electronics and Communication",
+  "pricingLevel": 2
+ },
+ {
+  "_id": "nodes/15133107",
+  "category": "Home",
+  "pricingLevel": 2
+ },
+ {
+  "_id": "nodes/15133113",
+  "category": "Jewellery and Watches",
+  "pricingLevel": 3
+ },
+ {
+  "_id": "nodes/14064119",
+  "category": "Footwear",
+  "pricingLevel": 2
+ },
+ {
+  "_id": "nodes/14064117",
+  "category": "Footwear",
+  "pricingLevel": 2
+ },
+ {
+  "_id": "nodes/14064115",
+  "category": "Footwear",
+  "pricingLevel": 2
+ },
+ {
+  "_id": "nodes/14064113",
+  "category": "Footwear",
+  "pricingLevel": 2
+ },
+ {
+  "_id": "nodes/15133132",
+  "category": "Bags and Footwear",
+  "pricingLevel": 1
+ },
+ {
+  "_id": "nodes/15133143",
+  "category": "Fashion",
+  "pricingLevel": 2
+ },
+ {
+  "_id": "nodes/14071232",
+  "category": "Food and Beverages",
+  "pricingLevel": 3
+ },
+ {
+  "_id": "nodes/14069043",
+  "category": "Gifts, Books, Toys , and music",
+  "pricingLevel": 1
+ },
+ {
+  "_id": "nodes/14069033",
+  "category": "Jewellery and Watches",
+  "pricingLevel": 1
+ },
+ {
+  "_id": "nodes/14069031",
+  "category": "Food and Beverages",
+  "pricingLevel": 1
+ },
+ {
+  "_id": "nodes/14069029",
+  "category": "Beauty and Cosmetics",
+  "pricingLevel": 2
+ },
+ {
+  "_id": "nodes/14069027",
+  "category": "Jewellery and Watches",
+  "pricingLevel": 3
+ },
+ {
+  "_id": "nodes/14069025",
+  "category": "Fashion",
+  "pricingLevel": 3
+ },
+ {
+  "_id": "nodes/14069023",
+  "category": "Food and Beverages",
+  "pricingLevel": 2
+ },
+ {
+  "_id": "nodes/14069011",
+  "category": "Food and Beverages",
+  "pricingLevel": 2
+ },
+ {
+  "_id": "nodes/14069007",
+  "category": "Food and Beverages",
+  "pricingLevel": 2
+ },
+ {
+  "_id": "nodes/14069005",
+  "category": "Fashion",
+  "pricingLevel": 2
+ },
+ {
+  "_id": "nodes/14068966",
+  "category": "Food and Beverages",
+  "pricingLevel": 2
+ },
+ {
+  "_id": "nodes/14068964",
+  "category": "Fashion",
+  "pricingLevel": 2
+ },
+ {
+  "_id": "nodes/14068960",
+  "category": "Home",
+  "pricingLevel": 2
+ },
+ {
+  "_id": "nodes/14068958",
+  "category": "Fashion",
+  "pricingLevel": 2
+ },
+ {
+  "_id": "nodes/14068956",
+  "category": "Fashion",
+  "pricingLevel": 2
+ },
+ {
+  "_id": "nodes/14068950",
+  "category": "Fashion",
+  "pricingLevel": 2
+ },
+ {
+  "_id": "nodes/14068948",
+  "category": "Fashion",
+  "pricingLevel": 2
+ },
+ {
+  "_id": "nodes/14069017",
+  "category": "Fashion",
+  "pricingLevel": 2
+ },
+ {
+  "_id": "nodes/14068946",
+  "category": "Fashion",
+  "pricingLevel": 2
+ },
+ {
+  "_id": "nodes/14068940",
+  "category": "Fashion",
+  "pricingLevel": 2
+ },
+ {
+  "_id": "nodes/14068938",
+  "category": "Fashion",
+  "pricingLevel": 2
+ },
+ {
+  "_id": "nodes/14068926",
+  "category": "Fashion",
+  "pricingLevel": 2
+ },
+ {
+  "_id": "nodes/14068922",
+  "category": "Fashion",
+  "pricingLevel": 2
+ },
+ {
+  "_id": "nodes/14068999",
+  "category": "Fashion",
+  "pricingLevel": 2
+ },
+ {
+  "_id": "nodes/14068997",
+  "category": "Fashion",
+  "pricingLevel": 2
+ },
+ {
+  "_id": "nodes/14068995",
+  "category": "Fashion",
+  "pricingLevel": 3
+ },
+ {
+  "_id": "nodes/15133172",
+  "category": "Fashion",
+  "pricingLevel": 2
+ },
+ {
+  "_id": "nodes/14190512",
+  "category": "Fashion",
+  "pricingLevel": 1
+ },
+ {
+  "_id": "nodes/14068989",
+  "category": "Fashion",
+  "pricingLevel": 2
+ },
+ {
+  "_id": "nodes/14068987",
+  "category": "Eyewear",
+  "pricingLevel": 1
+ },
+ {
+  "_id": "nodes/14068985",
+  "category": "Fashion",
+  "pricingLevel": 1
+ },
+ {
+  "_id": "nodes/14068983",
+  "category": "Fashion",
+  "pricingLevel": 2
+ },
+ {
+  "_id": "nodes/14068981",
+  "category": "Fashion",
+  "pricingLevel": 1
+ },
+ {
+  "_id": "nodes/14068979",
+  "category": "Fashion",
+  "pricingLevel": 2
+ },
+ {
+  "_id": "nodes/14068977",
+  "category": "Fashion",
+  "pricingLevel": 2
+ },
+ {
+  "_id": "nodes/14068974",
+  "category": "Sports (Fashion)",
+  "pricingLevel": 3
+ },
+ {
+  "_id": "nodes/14068972",
+  "category": "Fashion",
+  "pricingLevel": 1
+ },
+ {
+  "_id": "nodes/14069679",
+  "category": "Sports (Fashion)",
+  "pricingLevel": 2
+ },
+ {
+  "_id": "nodes/14069681",
+  "category": "Fashion",
+  "pricingLevel": 2
+ },
+ {
+  "_id": "nodes/14069685",
+  "category": "Fashion",
+  "pricingLevel": 2
+ },
+ {
+  "_id": "nodes/14069689",
+  "category": "Fashion",
+  "pricingLevel": 2
+ },
+ {
+  "_id": "nodes/15133177",
+  "category": "Fashion",
+  "pricingLevel": 2
+ },
+ {
+  "_id": "nodes/15133178",
+  "category": "Fashion",
+  "pricingLevel": 2
+ },
+ {
+  "_id": "nodes/15133179",
+  "category": "Fashion",
+  "pricingLevel": 2
+ },
+ {
+  "_id": "nodes/15133180",
+  "category": "Fashion",
+  "pricingLevel": 2
+ },
+ {
+  "_id": "nodes/15133185",
+  "category": "Fashion",
+  "pricingLevel": 2
+ },
+ {
+  "_id": "nodes/15133141",
+  "category": "Food and Beverages",
+  "pricingLevel": 2
+ },
+ {
+  "_id": "nodes/15133142",
+  "category": "Food and Beverages",
+  "pricingLevel": 2
+ },
+ {
+  "_id": "nodes/15133133",
+  "category": "Gifts, Books, Toys and Music",
+  "pricingLevel": 2
+ },
+ {
+  "_id": "nodes/14069691",
+  "category": "Jewellery and Watches",
+  "pricingLevel": 2
+ },
+ {
+  "_id": "nodes/14071222",
+  "category": "Food and Beverages",
+  "pricingLevel": 2
+ },
+ {
+  "_id": "nodes/15133124",
+  "category": "Fashion",
+  "pricingLevel": 2
+ },
+ {
+  "_id": "nodes/15133125",
+  "category": "Fashion",
+  "pricingLevel": 2
+ },
+ {
+  "_id": "nodes/14069647",
+  "category": "Jewellery and Watches",
+  "pricingLevel": 2
+ },
+ {
+  "_id": "nodes/14071224",
+  "category": "Beauty and Cosmetics",
+  "pricingLevel": 2
+ },
+ {
+  "_id": "nodes/15133205",
+  "category": "Food and Beverages",
+  "pricingLevel": 2
+ },
+ {
+  "_id": "nodes/15133206",
+  "category": "Food and Beverages",
+  "pricingLevel": 2
+ },
+ {
+  "_id": "nodes/15133207",
+  "category": "Food and Beverages",
+  "pricingLevel": 2
+ },
+ {
+  "_id": "nodes/14069015",
+  "category": "Fashion",
+  "pricingLevel": 2
+ },
+ {
+  "_id": "nodes/14069013",
+  "category": "Footwear",
+  "pricingLevel": 2
+ },
+ {
+  "_id": "nodes/14071226",
+  "category": "Home",
+  "pricingLevel": 3
+ },
+ {
+  "_id": "nodes/14071228",
+  "category": "Sports and Outdoor",
+  "pricingLevel": 1
+ },
+ {
+  "_id": "nodes/14069649",
+  "category": "Fashion",
+  "pricingLevel": 2
+ },
+ {
+  "_id": "nodes/14071230",
+  "category": "Sports and Outdoor",
+  "pricingLevel": 2
+ },
+ {
+  "_id": "nodes/14069653",
+  "category": "Fashion",
+  "pricingLevel": 2
+ },
+ {
+  "_id": "nodes/14071234",
+  "category": "Food and Beverages",
+  "pricingLevel": 2
+ },
+ {
+  "_id": "nodes/14069655",
+  "category": "Fashion",
+  "pricingLevel": 3
+ },
+ {
+  "_id": "nodes/14069657",
+  "category": "Fashion",
+  "pricingLevel": 2
+ },
+ {
+  "_id": "nodes/14071236",
+  "category": "Fashion",
+  "pricingLevel": 2
+ },
+ {
+  "_id": "nodes/14069659",
+  "category": "Eyewear",
+  "pricingLevel": 2
+ },
+ {
+  "_id": "nodes/14071242",
+  "category": "Baby and Kids",
+  "pricingLevel": 2
+ },
+ {
+  "_id": "nodes/15133208",
+  "category": "Fashion",
+  "pricingLevel": 2
+ },
+ {
+  "_id": "nodes/14072968",
+  "category": "Fashion",
+  "pricingLevel": 2
+ },
+ {
+  "_id": "nodes/15133209",
+  "category": "Fashion",
+  "pricingLevel": 2
+ },
+ {
+  "_id": "nodes/15133213",
+  "category": "Food and Beverages",
+  "pricingLevel": 2
+ },
+ {
+  "_id": "nodes/15133214",
+  "category": "Food and Beverages",
+  "pricingLevel": 2
+ },
+ {
+  "_id": "nodes/14071244",
+  "category": "Gifts , Books , Toys and Music",
+  "pricingLevel": 2
+ },
+ {
+  "_id": "nodes/14069661",
+  "category": "Fashion",
+  "pricingLevel": 2
+ },
+ {
+  "_id": "nodes/14069667",
+  "category": "Beauty and Cosmetics",
+  "pricingLevel": 2
+ },
+ {
+  "_id": "nodes/14071246",
+  "category": "Food and Beverages",
+  "pricingLevel": 2
+ },
+ {
+  "_id": "nodes/14069669",
+  "category": "Footwear",
+  "pricingLevel": 2
+ },
+ {
+  "_id": "nodes/14069671",
+  "category": "Fashion",
+  "pricingLevel": 2
+ },
+ {
+  "_id": "nodes/14071248",
+  "category": "Food and Beverages",
+  "pricingLevel": 2
+ },
+ {
+  "_id": "nodes/14069673",
+  "category": "Services",
+  "pricingLevel": 2
+ },
+ {
+  "_id": "nodes/14069675",
+  "category": "Fashion",
+  "pricingLevel": 1
+ },
+ {
+  "_id": "nodes/14071250",
+  "category": "Medicine",
+  "pricingLevel": 2
+ },
+ {
+  "_id": "nodes/14071252",
+  "category": "Electronics and Communication",
+  "pricingLevel": 2
+ },
+ {
+  "_id": "nodes/14069677",
+  "category": "Eyewear",
+  "pricingLevel": 2
+ },
+ {
+  "_id": "nodes/14071254",
+  "category": "Beauty and Cosmetics",
+  "pricingLevel": 3
+ },
+ {
+  "_id": "nodes/14071256",
+  "category": "Food and Beverages",
+  "pricingLevel": 2
+ },
+ {
+  "_id": "nodes/14068962",
+  "category": "Fashion",
+  "pricingLevel": 2
+ },
+ {
+  "_id": "nodes/14071260",
+  "category": "Food and Beverages",
+  "pricingLevel": 2
+ },
+ {
+  "_id": "nodes/14071194",
+  "category": "Food and Beverages",
+  "pricingLevel": 2
+ },
+ {
+  "_id": "nodes/14071196",
+  "category": "Food and Beverages",
+  "pricingLevel": 2
+ },
+ {
+  "_id": "nodes/14071198",
+  "category": "Fashion",
+  "pricingLevel": 1
+ },
+ {
+  "_id": "nodes/14071204",
+  "category": "Fashion",
+  "pricingLevel": 2
+ },
+ {
+  "_id": "nodes/14071206",
+  "category": "Entertainment",
+  "pricingLevel": 2
+ },
+ {
+  "_id": "nodes/14071208",
+  "category": "Food and Beverages",
+  "pricingLevel": 2
+ },
+ {
+  "_id": "nodes/14071210",
+  "category": "Gifts , Books , Toys and Music",
+  "pricingLevel": 2
+ },
+ {
+  "_id": "nodes/14069687",
+  "category": "Hypermarket",
+  "pricingLevel": 2
+ },
+ {
+  "_id": "nodes/14068944",
+  "category": "Fashion",
+  "pricingLevel": 2
+ },
+ {
+  "_id": "nodes/14071212",
+  "category": "Fashion",
+  "pricingLevel": 2
+ },
+ {
+  "_id": "nodes/14068942",
+  "category": "Fashion",
+  "pricingLevel": 2
+ },
+ {
+  "_id": "nodes/14071214",
+  "category": "Fashion",
+  "pricingLevel": 2
+ },
+ {
+  "_id": "nodes/14069695",
+  "category": "Jewellery and Watches",
+  "pricingLevel": 2
+ },
+ {
+  "_id": "nodes/14071220",
+  "category": "Fashion",
+  "pricingLevel": 3
+ },
+ {
+  "_id": "nodes/14068936",
+  "category": "Fashion",
+  "pricingLevel": 2
+ },
+ {
+  "_id": "nodes/14068934",
+  "category": "Home",
+  "pricingLevel": 2
+ },
+ {
+  "_id": "nodes/14068932",
+  "category": "Fashion",
+  "pricingLevel": 2
+ },
+ {
+  "_id": "nodes/14068930",
+  "category": "Fashion",
+  "pricingLevel": 2
+ },
+ {
+  "_id": "nodes/14068928",
+  "category": "Fashion",
+  "pricingLevel": 2
+ },
+ {
+  "_id": "nodes/14068924",
+  "category": "Footwear",
+  "pricingLevel": 2
+ },
+ {
+  "_id": "nodes/14068920",
+  "category": "Fashion",
+  "pricingLevel": 2
+ },
+ {
+  "_id": "nodes/14069045",
+  "category": "Home",
+  "pricingLevel": 2
+ },
+ {
+  "_id": "nodes/14069003",
+  "category": "Jewellery and Watches",
+  "pricingLevel": 2
+ },
+ {
+  "_id": "nodes/14069041",
+  "category": "Jewellery and Watches",
+  "pricingLevel": 2
+ },
+ {
+  "_id": "nodes/14064070",
+  "category": "Footwear",
+  "pricingLevel": 2
+ },
+ {
+  "_id": "nodes/14064072",
+  "category": "Footwear",
+  "pricingLevel": 2
+ },
+ {
+  "_id": "nodes/14064074",
+  "category": "Home",
+  "pricingLevel": 2
+ },
+ {
+  "_id": "nodes/14064076",
+  "category": "Fashion",
+  "pricingLevel": 2
+ },
+ {
+  "_id": "nodes/14064078",
+  "category": "Fashion",
+  "pricingLevel": 2
+ },
+ {
+  "_id": "nodes/14548633",
+  "category": "Fashion",
+  "pricingLevel": 1
+ },
+ {
+  "_id": "nodes/14548631",
+  "category": "Beauty and Cosmetics",
+  "pricingLevel": 1
+ },
+ {
+  "_id": "nodes/14548629",
+  "category": "Home",
+  "pricingLevel": 3
+ },
+ {
+  "_id": "nodes/15133105",
+  "category": "Home",
+  "pricingLevel": 2
+ },
+ {
+  "_id": "nodes/14548626",
+  "category": "Eyewear",
+  "pricingLevel": 2
+ },
+ {
+  "_id": "nodes/14548624",
+  "category": "Home",
+  "pricingLevel": 2
+ },
+ {
+  "_id": "nodes/14548620",
+  "category": "Eyewear",
+  "pricingLevel": 2
+ },
+ {
+  "_id": "nodes/14548618",
+  "category": "Electronics and Communication",
+  "pricingLevel": 2
+ },
+ {
+  "_id": "nodes/14548616",
+  "category": "Electronics and Communication",
+  "pricingLevel": 2
+ },
+ {
+  "_id": "nodes/14548614",
+  "category": "Gifts, Books, Toys and Music",
+  "pricingLevel": 1
+ },
+ {
+  "_id": "nodes/14548608",
+  "category": "Electronics and Communication",
+  "pricingLevel": 2
+ },
+ {
+  "_id": "nodes/14548605",
+  "category": "Electronics and Communication",
+  "pricingLevel": 2
+ },
+ {
+  "_id": "nodes/14548603",
+  "category": "Home",
+  "pricingLevel": 2
+ },
+ {
+  "_id": "nodes/14548601",
+  "category": "Fashion",
+  "pricingLevel": 2
+ },
+ {
+  "_id": "nodes/14545063",
+  "category": "Beauty and Cosmetics",
+  "pricingLevel": 2
+ },
+ {
+  "_id": "nodes/14548599",
+  "category": "Home",
+  "pricingLevel": 2
+ },
+ {
+  "_id": "nodes/14548595",
+  "category": "Home",
+  "pricingLevel": 3
+ },
+ {
+  "_id": "nodes/14548591",
+  "category": "Fashion",
+  "pricingLevel": 2
+ },
+ {
+  "_id": "nodes/14548589",
+  "category": "Hypermarket",
+  "pricingLevel": 2
+ },
+ {
+  "_id": "nodes/14548583",
+  "category": "Fashion",
+  "pricingLevel": 2
+ },
+ {
+  "_id": "nodes/14548581",
+  "category": "Food and Beverages",
+  "pricingLevel": 1
+ },
+ {
+  "_id": "nodes/14548579",
+  "category": "Fashion",
+  "pricingLevel": 2
+ },
+ {
+  "_id": "nodes/14548689",
+  "category": "Hypermarket",
+  "pricingLevel": 1
+ },
+ {
+  "_id": "nodes/15133243",
+  "category": "Services",
+  "pricingLevel": 3
+ },
+ {
+  "_id": "nodes/14548687",
+  "category": "Food and Beverages",
+  "pricingLevel": 2
+ },
+ {
+  "_id": "nodes/14548684",
+  "category": "Home",
+  "pricingLevel": 2
+ },
+ {
+  "_id": "nodes/14548682",
+  "category": "Home",
+  "pricingLevel": 2
+ },
+ {
+  "_id": "nodes/14548680",
+  "category": "Hypermarket",
+  "pricingLevel": 1
+ },
+ {
+  "_id": "nodes/14548678",
+  "category": "Home",
+  "pricingLevel": 2
+ },
+ {
+  "_id": "nodes/14548676",
+  "category": "Home",
+  "pricingLevel": 3
+ },
+ {
+  "_id": "nodes/14548658",
+  "category": "Footwear",
+  "pricingLevel": 2
+ },
+ {
+  "_id": "nodes/14548670",
+  "category": "Footwear",
+  "pricingLevel": 1
+ },
+ {
+  "_id": "nodes/15133080",
+  "category": "Beauty and Cosmetics",
+  "pricingLevel": 2
+ },
+ {
+  "_id": "nodes/14548650",
+  "category": "Eyewear",
+  "pricingLevel": 2
+ },
+ {
+  "_id": "nodes/14548652",
+  "category": "Electronics and Communication",
+  "pricingLevel": 3
+ },
+ {
+  "_id": "nodes/14548654",
+  "category": "Eyewear",
+  "pricingLevel": 2
+ },
+ {
+  "_id": "nodes/14548656",
+  "category": "Gifts, Books, Toys and Music",
+  "pricingLevel": 2
+ },
+ {
+  "_id": "nodes/15133254",
+  "category": "Food and Beverages",
+  "pricingLevel": 3
+ },
+ {
+  "_id": "nodes/15133255",
+  "category": "Food and Beverages",
+  "pricingLevel": 3
+ },
+ {
+  "_id": "nodes/15133256",
+  "category": "Food and Beverages",
+  "pricingLevel": 2
+ },
+ {
+  "_id": "nodes/15133257",
+  "category": "Food and Beverages",
+  "pricingLevel": 2
+ },
+ {
+  "_id": "nodes/14551850",
+  "category": "Food and Beverages",
+  "pricingLevel": 1
+ },
+ {
+  "_id": "nodes/14551848",
+  "category": "Food and Beverages",
+  "pricingLevel": 1
+ },
+ {
+  "_id": "nodes/14551846",
+  "category": "Food and Beverages",
+  "pricingLevel": 1
+ },
+ {
+  "_id": "nodes/14551842",
+  "category": "Food and Beverages",
+  "pricingLevel": 2
+ },
+ {
+  "_id": "nodes/14551840",
+  "category": "Food and Beverages",
+  "pricingLevel": 1
+ },
+ {
+  "_id": "nodes/15133275",
+  "category": "Fashion - Electronics",
+  "pricingLevel": 2
+ },
+ {
+  "_id": "nodes/15133276",
+  "category": "Fashion - Electronics",
+  "pricingLevel": 2
+ },
+ {
+  "_id": "nodes/15133277",
+  "category": "Food and Beverages",
+  "pricingLevel": 2
+ },
+ {
+  "_id": "nodes/14893381",
+  "category": "Food and Beverages",
+  "pricingLevel": 2
+ },
+ {
+  "_id": "nodes/15133278",
+  "category": "Food and Beverages",
+  "pricingLevel": 2
+ },
+ {
+  "_id": "nodes/14548668",
+  "category": "Beauty and Cosmetics",
+  "pricingLevel": 3
+ },
+ {
+  "_id": "nodes/14548666",
+  "category": "Fashion",
+  "pricingLevel": 2
+ },
+ {
+  "_id": "nodes/14548660",
+  "category": "Gifts, Books, Toys and Music",
+  "pricingLevel": 2
+ },
+ {
+  "_id": "nodes/15129020",
+  "category": "Entertainment",
+  "pricingLevel": 3
+ },
+ {
+  "_id": "nodes/15133297",
+  "category": "Services",
+  "pricingLevel": 3
+ },
+ {
+  "_id": "nodes/15133299",
+  "category": "Services",
+  "pricingLevel": 3
+ },
+ {
+  "_id": "nodes/15133300",
+  "category": "Food and Beverages",
+  "pricingLevel": 2
+ },
+ {
+  "_id": "nodes/15133301",
+  "category": "Food and Beverages",
+  "pricingLevel": 2
+ },
+ {
+  "_id": "nodes/15133302",
+  "category": "Food and Beverages",
+  "pricingLevel": 2
+ },
+ {
+  "_id": "nodes/15133304",
+  "category": "Food and Beverages",
+  "pricingLevel": 2
+ },
+ {
+  "_id": "nodes/15133306",
+  "category": "Food and Beverages",
+  "pricingLevel": 2
+ },
+ {
+  "_id": "nodes/15133307",
+  "category": "Food and Beverages",
+  "pricingLevel": 2
+ },
+ {
+  "_id": "nodes/15133303",
+  "category": "Food and Beverages",
+  "pricingLevel": 2
+ },
+ {
+  "_id": "nodes/15133308",
+  "category": "Food and Beverages",
+  "pricingLevel": 2
+ },
+ {
+  "_id": "nodes/15133310",
+  "category": "Services"
+ },
+ {
+  "_id": "nodes/15133184",
+  "category": "Fashion",
+  "pricingLevel": 2
+ },
+ {
+  "_id": "nodes/15133339",
+  "category": "Food and Beverages",
+  "pricingLevel": 3
+ },
+ {
+  "_id": "nodes/14551854",
+  "category": "Entertainment",
+  "pricingLevel": 2
+ },
+ {
+  "_id": "nodes/14551852",
+  "category": "Food and Beverages",
+  "pricingLevel": 2
+ },
+ {
+  "_id": "nodes/14551838",
+  "category": "Food and Beverages",
+  "pricingLevel": 2
+ },
+ {
+  "_id": "nodes/14551832",
+  "category": "Food and Beverages",
+  "pricingLevel": 2
+ },
+ {
+  "_id": "nodes/14551828",
+  "category": "Food and Beverages",
+  "pricingLevel": 2
+ },
+ {
+  "_id": "nodes/14551830",
+  "category": "Food and Beverages",
+  "pricingLevel": 2
+ },
+ {
+  "_id": "nodes/14064084",
+  "category": "Fashion",
+  "pricingLevel": 2
+ }
+]
+

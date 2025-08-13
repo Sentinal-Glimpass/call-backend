@@ -1,0 +1,12 @@
+node_modules/
+.env
+package-lock.json
+ipPool.json
+
+# Upload directories - temporary files should not be committed
+uploads/
+list-uploads/
+logs/
+
+# Log files
+*.log
