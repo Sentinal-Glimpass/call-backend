@@ -1798,18 +1798,21 @@ async function getCampaignProgress(campaignId) {
     
     // Always auto-determine status based on call states (ignore database status except for manual overrides)
     if (!['paused', 'cancelled', 'failed'].includes(campaignStatus)) {
-      // Simple rule: mark campaign completed only when ringing == processed == ongoing == 0
-      const activeCalls = counts.processed + counts.ringing + counts.ongoing;
+      // FIXED: Campaign is completed when call-ended + completed + failed == totalContacts
+      const finishedCalls = counts["call-ended"] + counts.completed + counts.failed;
+      const totalContacts = campaign.totalContacts || 0;
       
-      console.log(`🔍 DEBUG: activeCalls (processed + ringing + ongoing): ${activeCalls} (${counts.processed} + ${counts.ringing} + ${counts.ongoing})`);
-      console.log(`🔍 DEBUG: call-ended: ${counts["call-ended"]}, completed: ${counts.completed}`);
+      console.log(`🔍 DEBUG: finishedCalls (call-ended + completed + failed): ${finishedCalls} (${counts["call-ended"]} + ${counts.completed} + ${counts.failed})`);
+      console.log(`🔍 DEBUG: totalContacts: ${totalContacts}`);
+      console.log(`🔍 DEBUG: activeCalls (processed + ringing + ongoing): ${counts.processed + counts.ringing + counts.ongoing}`);
       
-      if (activeCalls > 0) {
-        campaignStatus = 'running';  // Still has active calls
-        console.log(`🔍 DEBUG: Status -> 'running' (${activeCalls} active calls remaining)`);
+      
+      if (finishedCalls >= totalContacts && totalContacts > 0) {
+        campaignStatus = 'completed';  // All contacts processed
+        console.log(`🔍 DEBUG: Status -> 'completed' (${finishedCalls}/${totalContacts} contacts finished)`);
       } else {
-        campaignStatus = 'completed';  // No active calls remaining
-        console.log(`🔍 DEBUG: Status -> 'completed' (no active calls remaining)`);
+        campaignStatus = 'running';  // Still processing contacts
+        console.log(`🔍 DEBUG: Status -> 'running' (${finishedCalls}/${totalContacts} contacts finished, still processing)`);
       }
     } else {
       console.log(`🔍 DEBUG: Status kept as manual override: ${campaignStatus}`);

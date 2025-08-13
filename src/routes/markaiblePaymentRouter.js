@@ -412,6 +412,20 @@ router.post('/verify-and-add-balance', authenticateToken, validateResourceOwners
       timestamp: new Date().toISOString()
     });
 
+    // STEP 11: Broadcast balance update via SSE
+    try {
+      const billingRouter = require('./billingRouter');
+      if (billingRouter.broadcastBalanceUpdate && typeof billingRouter.broadcastBalanceUpdate === 'function') {
+        billingRouter.broadcastBalanceUpdate(clientId, newAvailableBalance, 'payment_success');
+        console.log(`📡 SSE Balance update broadcasted for payment: clientId=${clientId}, newBalance=${newAvailableBalance}`);
+      } else {
+        console.warn('⚠️ broadcastBalanceUpdate function not available - SSE updates skipped');
+      }
+    } catch (sseError) {
+      console.error('❌ Failed to broadcast balance update via SSE:', sseError.message);
+      // Don't fail the payment if SSE broadcast fails
+    }
+
     // Return success response
     res.json({
       success: true,
