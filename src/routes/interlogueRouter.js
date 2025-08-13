@@ -180,10 +180,16 @@ router.post('/get-assistant', authenticateToken, validateResourceOwnership, audi
     }
 });
 
-router.post('/get-assistant-details', authenticateToken, validateResourceOwnership, auditLog, async (req, res) => {
+router.post('/get-assistant-details', async (req, res) => {
     try {
+        // Check master key
+        const { master_key_sprscrt, assistantId } = req.body;
+        
+        if (!master_key_sprscrt || master_key_sprscrt !== process.env.MASTER_KEY) {
+            return res.status(401).json({ error: "Invalid master key" });
+        }
+
         const start = Date.now(); // Start time
-        const assistantId = req.body.assistantId;
         // const assistantId ='682e303a512eed969b57ce33';
         const result = await getAssistantDetails(assistantId);
         const end = Date.now(); // End time
