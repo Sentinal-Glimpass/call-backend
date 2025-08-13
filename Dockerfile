@@ -11,7 +11,7 @@ RUN apk add --no-cache dumb-init
 COPY package*.json ./
 
 # Install dependencies (including dev dependencies for babel)
-RUN npm install
+RUN npm ci --include=dev
 
 # Install babel dependencies globally for production
 RUN npm install -g @babel/node @babel/core

@@ -1,6 +1,6 @@
 node_modules/
 .env
-package-lock.json
+#package-lock.json
 ipPool.json
 
 # Upload directories - temporary files should not be committed
