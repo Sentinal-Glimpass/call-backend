@@ -6,6 +6,15 @@ const cors = require('cors');
 const swaggerJsdoc = require('swagger-jsdoc');
 const swaggerUi = require('swagger-ui-express');
 require ('dotenv').config();
+
+// Environment validation for production
+const requiredEnvVars = [];
+const missingEnvVars = requiredEnvVars.filter(envVar => !process.env[envVar]);
+
+if (missingEnvVars.length > 0 && process.env.NODE_ENV === 'production') {
+  console.error('❌ Missing required environment variables:', missingEnvVars);
+  process.exit(1);
+}
 // LEGACY ROUTERS - DEPRECATED (DO NOT USE)
 // const creatorRouter = require('./src/routes/creatorRouter');
 // const userRouter = require('./src/routes/userRouter');
@@ -36,8 +45,25 @@ const { apiLogger, requestCounter } = require('./src/middleware/apiLogger')
 // 	database: 'mydb',
 // };
 // Setup express server
-const port = process.env.PORT || 7999; 
+const port = process.env.PORT || 8080; 
 const app = express();
+
+// Trust proxy for Cloud Run
+app.set('trust proxy', 1);
+
+// Security headers for production
+app.use((req, res, next) => {
+  // Security headers
+  res.setHeader('X-Content-Type-Options', 'nosniff');
+  res.setHeader('X-Frame-Options', 'DENY');
+  res.setHeader('X-XSS-Protection', '1; mode=block');
+  res.setHeader('Referrer-Policy', 'strict-origin-when-cross-origin');
+  
+  // Remove sensitive headers
+  res.removeHeader('X-Powered-By');
+  
+  next();
+});
 
 // Configure CORS for production security
 const corsOptions = {
@@ -153,8 +179,10 @@ const swaggerOptions = {
     },
     servers: [
       {
-        url: `http://localhost:${process.env.PORT || 7999}`,
-        description: 'Development server'
+        url: process.env.NODE_ENV === 'production' 
+          ? `https://${process.env.CLOUD_RUN_SERVICE_URL || 'your-service.run.app'}`
+          : `http://localhost:${process.env.PORT || 8080}`,
+        description: process.env.NODE_ENV === 'production' ? 'Production server' : 'Development server'
       }
     ],
   },
@@ -166,6 +194,15 @@ app.use('/api-docs', swaggerUi.serve, swaggerUi.setup(specs));
 
 // Health check routes (no authentication required)
 app.use('/health', healthRouter);
+
+// Cloud Run health check
+app.get('/', (req, res) => {
+  res.status(200).json({ 
+    status: 'healthy', 
+    timestamp: new Date().toISOString(),
+    version: process.env.npm_package_version || '1.0.0'
+  });
+});
 
 // Public routes (no authentication required)
 app.use('/interlogue', interlogueRouter); // Contains both public /get-client and protected routes
@@ -197,14 +234,32 @@ app.use('/billing', billingRouter);
 
 // db.useBasicAuth(dbConfig.username, dbConfig.password);
 
+// Graceful shutdown handling for Cloud Run
+const shutdown = (signal) => {
+  console.log(`🛑 Received ${signal}, starting graceful shutdown...`);
+  server.close((err) => {
+    if (err) {
+      console.error('❌ Error during server shutdown:', err);
+      process.exit(1);
+    }
+    console.log('✅ Server closed successfully');
+    process.exit(0);
+  });
+};
+
+process.on('SIGINT', () => shutdown('SIGINT'));
+process.on('SIGTERM', () => shutdown('SIGTERM'));
+
 // START THE SERVER
-app.listen(port, async function(){
-	console.log('Magic happens on port11 ' + port);
+const server = app.listen(port, async function(){
+	console.log(`🚀 Server started on port ${port} in ${process.env.NODE_ENV || 'development'} mode`);
+	console.log(`📊 Swagger UI available at: http://localhost:${port}/api-docs`);
 	
 	// Initialize Cloud Run container lifecycle management
 	try {
 		const { initializeContainer } = require('./src/utils/containerLifecycle.js');
 		await initializeContainer();
+		console.log('✅ Container lifecycle initialized');
 	} catch (error) {
 		console.error('❌ Error initializing container lifecycle:', error);
 		// Continue server startup even if container lifecycle fails
