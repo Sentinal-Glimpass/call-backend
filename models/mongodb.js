@@ -15,10 +15,14 @@ const client = new MongoClient(uri, {
     deprecationErrors: true,
   },
   maxPoolSize: 10, // Maximum number of connections in the pool
-  serverSelectionTimeoutMS: 5000, // Keep trying to send operations for 5 seconds
+  serverSelectionTimeoutMS: 30000, // Increased to 30 seconds for better reliability
   socketTimeoutMS: 45000, // Close sockets after 45 seconds of inactivity
-  connectTimeoutMS: 10000, // Give up initial connection after 10 seconds
-  family: 4 // Use IPv4, skip trying IPv6
+  connectTimeoutMS: 30000, // Increased to 30 seconds for initial connection
+  family: 4, // Use IPv4, skip trying IPv6
+  retryWrites: true, // Enable retryable writes
+  retryReads: true, // Enable retryable reads
+  maxIdleTimeMS: 30000, // Close connections after 30 seconds of inactivity
+  heartbeatFrequencyMS: 10000, // Check server status every 10 seconds
 });
 
 // Connection state management
@@ -42,14 +46,36 @@ async function connectToMongo() {
   isConnecting = true;
   
   try {
+    console.log("🔄 Attempting to connect to MongoDB...");
     await client.connect();
     // Test the connection
     await client.db().admin().ping();
     isConnected = true;
     console.log("✅ Connected to MongoDB with connection pool!");
   } catch (error) {
-    console.error("❌ Error connecting to MongoDB:", error);
+    console.error("❌ Error connecting to MongoDB:", error.message);
+    console.error("🔍 Connection details:", {
+      servers: error.reason?.servers ? Array.from(error.reason.servers.keys()) : 'unknown',
+      type: error.reason?.type || 'unknown'
+    });
     isConnected = false;
+    
+    // Add retry logic for transient connection issues
+    if (error.name === 'MongoServerSelectionError') {
+      console.log("🔄 Retrying MongoDB connection in 5 seconds...");
+      await new Promise(resolve => setTimeout(resolve, 5000));
+      
+      try {
+        await client.connect();
+        await client.db().admin().ping();
+        isConnected = true;
+        console.log("✅ Connected to MongoDB on retry!");
+        return;
+      } catch (retryError) {
+        console.error("❌ Retry failed:", retryError.message);
+      }
+    }
+    
     throw error;
   } finally {
     isConnecting = false;
