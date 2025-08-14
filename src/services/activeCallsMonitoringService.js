@@ -30,8 +30,8 @@ async function getActiveCallsMonitoring(filters = {}) {
     // Get container health
     const containerHealth = await getContainerHealth();
     
-    // Build query for active calls
-    const query = { status: 'active' };
+    // Build query for active calls (processed + ringing + ongoing)
+    const query = { status: { $in: ['processed', 'ringing', 'ongoing'] } };
     if (filters.clientId) {
       query.clientId = new ObjectId(filters.clientId);
     }
@@ -45,7 +45,7 @@ async function getActiveCallsMonitoring(filters = {}) {
     
     // Get call distribution by client
     const callsByClient = await activeCallsCollection.aggregate([
-      { $match: { status: 'active' } },
+      { $match: { status: { $in: ['processed', 'ringing', 'ongoing'] } } },
       {
         $group: {
           _id: "$clientId",

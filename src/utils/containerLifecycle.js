@@ -8,7 +8,6 @@ const { ObjectId } = require('mongodb');
 
 // Generate unique container ID for this instance
 const CONTAINER_ID = `container_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
-const STARTUP_RECOVERY_DELAY = parseInt(process.env.STARTUP_RECOVERY_DELAY) || 5000;
 const ORPHAN_DETECTION_THRESHOLD = parseInt(process.env.ORPHAN_DETECTION_THRESHOLD) || 120000;
 const CONTAINER_SHUTDOWN_GRACE = parseInt(process.env.CONTAINER_SHUTDOWN_GRACE) || 10000;
 
@@ -26,11 +25,7 @@ async function initializeContainer() {
     // Register signal handlers for graceful shutdown
     registerShutdownHandlers();
     
-    // Wait a bit for any concurrent container startups to settle
-    console.log(`⏳ Waiting ${STARTUP_RECOVERY_DELAY}ms before orphaned campaign recovery...`);
-    await new Promise(resolve => setTimeout(resolve, STARTUP_RECOVERY_DELAY));
-    
-    // Scan for and recover orphaned campaigns
+    // Scan for and recover orphaned campaigns immediately
     await scanAndRecoverOrphanedCampaigns();
     
     console.log(`✅ Container initialization complete: ${CONTAINER_ID}`);

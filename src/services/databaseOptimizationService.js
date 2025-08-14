@@ -52,8 +52,8 @@ async function validateDatabasePerformance() {
           { fields: { clientId: 1, startTime: -1 }, purpose: 'Client call history' }
         ],
         criticalQueries: [
-          { query: { status: 'active' }, description: "Active calls count" },
-          { query: { status: 'active', clientId: new ObjectId() }, description: "Client active calls" }
+          { query: { status: { $in: ['processed', 'ringing', 'ongoing'] } }, description: "Active calls count" },
+          { query: { status: { $in: ['processed', 'ringing', 'ongoing'] }, clientId: new ObjectId() }, description: "Client active calls" }
         ]
       },
       client: {

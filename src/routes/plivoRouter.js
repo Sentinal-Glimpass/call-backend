@@ -650,7 +650,7 @@ router.get('/get-active-channels', authenticateToken, validateResourceOwnership,
       const database = client.db("talkGlimpass");
       const activeCallsCollection = database.collection("activeCalls");
       
-      const query = { status: 'active' };
+      const query = { status: { $in: ['processed', 'ringing', 'ongoing'] } };
       if (clientId) {
         query.clientId = new (require('mongodb')).ObjectId(clientId);
       }

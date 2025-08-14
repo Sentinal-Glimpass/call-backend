@@ -26,11 +26,11 @@ async function checkClientConcurrency(clientId) {
     
     const maxAllowed = clientData?.maxConcurrentCalls || parseInt(process.env.DEFAULT_CLIENT_MAX_CONCURRENT_CALLS) || 10;
     
-    // Count current active calls for this client
+    // Count current active calls for this client (processed + ringing + ongoing)
     const activeCallsCollection = database.collection("activeCalls");
     const currentCount = await activeCallsCollection.countDocuments({
       clientId: new ObjectId(clientId),
-      status: 'active'
+      status: { $in: ['processed', 'ringing', 'ongoing'] }
     });
     
     return {
@@ -63,9 +63,9 @@ async function checkGlobalConcurrency() {
     
     const maxAllowed = parseInt(process.env.GLOBAL_MAX_CALLS) || parseInt(process.env.GLOBAL_MAX_CONCURRENT_CALLS) || 50;
     
-    // Count all active calls across the system
+    // Count all active calls across the system (processed + ringing + ongoing)
     const currentCount = await activeCallsCollection.countDocuments({
-      status: 'active'
+      status: { $in: ['processed', 'ringing', 'ongoing'] }
     });
     
     return {
@@ -185,7 +185,9 @@ async function trackCallStart(callData) {
     return {
       success: true,
       callId: result.insertedId.toString(),
-      activeCallsCount: await activeCallsCollection.countDocuments({ status: 'active' })
+      activeCallsCount: await activeCallsCollection.countDocuments({ 
+        status: { $in: ['processed', 'ringing', 'ongoing'] } 
+      })
     };
     
   } catch (error) {
@@ -265,7 +267,9 @@ async function trackCallEnd(callUUID, endData = {}) {
     
     return {
       success: true,
-      activeCallsCount: await activeCallsCollection.countDocuments({ status: 'active' })
+      activeCallsCount: await activeCallsCollection.countDocuments({ 
+        status: { $in: ['processed', 'ringing', 'ongoing'] } 
+      })
     };
     
   } catch (error) {
@@ -290,8 +294,10 @@ async function getConcurrencyStats(clientId = null) {
     
     const globalMax = parseInt(process.env.GLOBAL_MAX_CALLS) || parseInt(process.env.GLOBAL_MAX_CONCURRENT_CALLS) || 50;
     
-    // Global stats
-    const globalActive = await activeCallsCollection.countDocuments({ status: 'active' });
+    // Global stats (processed + ringing + ongoing)
+    const globalActive = await activeCallsCollection.countDocuments({ 
+      status: { $in: ['processed', 'ringing', 'ongoing'] } 
+    });
     
     const stats = {
       global: {
@@ -313,7 +319,7 @@ async function getConcurrencyStats(clientId = null) {
       const clientMax = clientData?.maxConcurrentCalls || parseInt(process.env.DEFAULT_CLIENT_MAX_CONCURRENT_CALLS) || 10;
       const clientActive = await activeCallsCollection.countDocuments({
         clientId: new ObjectId(clientId),
-        status: 'active'
+        status: { $in: ['processed', 'ringing', 'ongoing'] }
       });
       
       stats.client = {
@@ -350,7 +356,7 @@ async function cleanupTimeoutCalls() {
     
     const result = await activeCallsCollection.updateMany(
       {
-        status: 'active',
+        status: { $in: ['processed', 'ringing', 'ongoing'] },
         startTime: { $lt: timeoutThreshold }
       },
       {

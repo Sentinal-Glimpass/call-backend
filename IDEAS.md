@@ -66,3 +66,62 @@ MongoDB (Cold Data - 30+ days):
 3. Create TTL-based archival jobs
 4. Add monitoring for both systems
 5. Gradual migration of high-frequency operations to Redis
+
+## Global Rate Limiting for Serverless Architecture
+
+### Database-Driven Rate Limiting System
+
+**Problem**: Current `MAX_CALLS_PER_MINUTE` is per-campaign and uses in-memory counters, which doesn't work in serverless where containers can start/stop frequently.
+
+**Current System (Broken in Serverless)**:
+```javascript
+// Per-campaign, in-memory (won't persist across container restarts)
+let callsInLastMinute = 0;
+let rateLimitStartTime = Date.now();
+```
+
+**Proposed Solution**: Global database-driven rate limiting using MongoDB collection.
+
+**Implementation**:
+1. **Create `globalRateLimit` collection**:
+   ```javascript
+   {
+     _id: "global_rate_limit",
+     currentMinute: "2024-01-15T10:30:00.000Z", // truncated to minute
+     callsInThisMinute: 45,
+     lastUpdated: "2024-01-15T10:30:23.456Z"
+   }
+   ```
+
+2. **Atomic rate limit checking**:
+   ```javascript
+   // Before each call, atomically increment counter for current minute
+   const currentMinute = new Date().setSeconds(0, 0); // truncate to minute
+   const result = await rateCollection.findOneAndUpdate(
+     { _id: "global_rate_limit", currentMinute },
+     { 
+       $inc: { callsInThisMinute: 1 },
+       $set: { lastUpdated: new Date() }
+     },
+     { upsert: true, returnDocument: 'after' }
+   );
+   
+   if (result.callsInThisMinute > MAX_CALLS_PER_MINUTE) {
+     // Wait for next minute or reject call
+   }
+   ```
+
+3. **Benefits**:
+   - **Global limit**: All campaigns compete for same rate limit
+   - **Serverless-friendly**: Persists across container restarts
+   - **Atomic operations**: No race conditions between containers
+   - **Auto-cleanup**: Old minute records can be cleaned up
+
+4. **Environment Variables**:
+   - `MAX_CALLS_PER_MINUTE` - Global system limit (like GLOBAL_MAX_CALLS)
+   - `RATE_LIMIT_WINDOW` - Window size in milliseconds (default: 60000)
+
+**Impact**: 
+- Replace per-campaign rate limiting with global system limit
+- Ensure serverless containers respect shared rate limits
+- Better resource management across all campaigns
