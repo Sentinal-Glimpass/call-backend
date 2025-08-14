@@ -1845,9 +1845,10 @@ async function getTestCallReport(clientId) {
     const logCollection = database.collection("logData");
     const recordCollection = database.collection("plivoRecordData");
 
-    // Fetch all hangup data for test calls (campId = 'testcall')
+    // Fetch all hangup data for test calls (campId = 'testcall') filtered by clientId
     const hangupDataDocs = await hangupCollection.find({ 
-      campId: 'testcall'
+      campId: 'testcall',
+      clientId: clientId
     }).sort({ createdAt: -1 }).toArray();
 
     if (hangupDataDocs.length === 0) {

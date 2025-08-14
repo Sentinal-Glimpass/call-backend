@@ -134,7 +134,9 @@ router.post('/get-client', antiAutomationDelay, auditLog, async (req, res) => {
                 company: clientData.company,
                 tokens: clientData.tokens,
                 isActive: clientData.isActive,
-                apiKey: clientData.apiKey // Keep for backward compatibility
+                apiKey: clientData.apiKey, // Keep for backward compatibility
+                incomingSet: clientData.incomingSet || [],
+                callerNumbers: clientData.callerNumbers || []
             },
             token,
             expiresIn: process.env.JWT_EXPIRES_IN || '24h',

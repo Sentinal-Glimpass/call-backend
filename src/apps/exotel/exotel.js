@@ -147,7 +147,7 @@ async function makeCallViaCampaign(listSid, camp_name, clientId, balanceCount, r
     })();
 }
 
-async function addBillingHistoryInMongo(camp_name, clientId, balanceCount, date, campaignId, desc, transactionType, newAvailableBalance){
+async function addBillingHistoryInMongo(camp_name, clientId, balanceCount, date, campaignId, desc, transactionType, newAvailableBalance, paymentId = null, paymentProvider = null){
   try {
     await connectToMongo();
 
@@ -163,7 +163,9 @@ async function addBillingHistoryInMongo(camp_name, clientId, balanceCount, date,
       campaignId: campaignId,
       desc: desc,
       transactionType:transactionType,
-      newAvailableBalance: newAvailableBalance
+      newAvailableBalance: newAvailableBalance,
+      paymentId: paymentId,
+      paymentProvider: paymentProvider
     };
 
     // Insert the document into the collection

@@ -393,9 +393,11 @@ router.post('/verify-and-add-balance', authenticateToken, validateResourceOwners
         billingPayload.campaignId,
         billingPayload.desc,
         billingPayload.transactionType,
-        billingPayload.newAvailableBalance
+        billingPayload.newAvailableBalance,
+        razorpay_payment_id,
+        'Razorpay'
       );
-      console.log('Billing record added successfully');
+      console.log('Billing record added successfully with payment tracking');
     } catch (billingError) {
       console.error('Billing record failed (non-critical):', billingError);
       // Don't fail the payment if billing fails - the balance is already updated
