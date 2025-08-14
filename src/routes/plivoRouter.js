@@ -1400,6 +1400,9 @@ router.post('/hangup-url', async (req, res) => {
         
         console.log(`🎯 Using clientId: ${clientId} for ${callType} call`);
         
+        // Add resolved clientId to hangupData for proper storage
+        hangupData.clientId = clientId;
+        
         // Get client data using clientId
         const existingClient = await getClientByClientId(clientId);
         if (!existingClient) {
