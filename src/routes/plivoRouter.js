@@ -1415,59 +1415,59 @@ router.post('/hangup-url', async (req, res) => {
         const currentBalance = existingClient.availableBalance || 0;
         const newBalance = currentBalance - creditsToDeduct;
         
-        console.log(`💰 NEW Billing: ${callType} call - ${creditsToDeduct} credits deducted`);
-        console.log(`💰 Balance: ${currentBalance} -> ${newBalance}`);
+        console.log(`💰 NEW Billing: ${callType} call - ${creditsToDeduct} credits (duration: ${duration}s)`);
+        console.log(`💰 Current Balance: ${currentBalance}`);
         
-        // Update client balance in database
-        const { connectToMongo, client: mongoClient } = require('../../models/mongodb.js');
-        await connectToMongo();
-        const database = mongoClient.db("talkGlimpass");
-        const clientCollection = database.collection("client");
-        const { ObjectId } = require('mongodb');
+        // CORRECTED LOGIC: Campaign calls vs Non-campaign calls
+        if (callType === 'campaign') {
+          console.log(`📋 Campaign call - NO billing/balance update, only call tracking`);
+          
+          // For campaign calls: ONLY save call details for tracking, NO billing/balance updates
+          await saveCallBillingDetail({
+            clientId: clientId,
+            callUuid: hangupData.CallUUID,
+            duration: duration,
+            type: callType,
+            from: hangupData.From,
+            to: hangupData.To,
+            credits: 0, // Will be aggregated when campaign completes
+            aiCredits: 0,
+            telephonyCredits: 0, // Will be aggregated when campaign completes
+            campaignId: hangupData.campId,
+            campaignName: `Campaign ${hangupData.campId}`
+          });
+          
+          console.log(`✅ Campaign call tracked (no billing): ${hangupData.CallUUID}`);
+          
+        } else {
+          // For incoming and test calls: immediate billing as before
+          console.log(`💰 Immediate billing: ${currentBalance} -> ${currentBalance - creditsToDeduct}`);
+          
+          const { connectToMongo, client: mongoClient } = require('../../models/mongodb.js');
+          await connectToMongo();
+          const database = mongoClient.db("talkGlimpass");
+          const clientCollection = database.collection("client");
+          const { ObjectId } = require('mongodb');
         
-        await clientCollection.updateOne(
-          { _id: new ObjectId(clientId) },
-          { $set: { availableBalance: newBalance } }
-        );
-        
-        // Save detailed call record
-        await saveCallBillingDetail({
-          clientId: clientId,
-          callUuid: hangupData.CallUUID,
-          duration: duration,
-          type: callType,
-          from: hangupData.From,
-          to: hangupData.To,
-          credits: creditsToDeduct,
-          aiCredits: 0, // Will be updated later via bot
-          telephonyCredits: creditsToDeduct,
-          campaignId: callType === 'campaign' ? hangupData.campId : null,
-          campaignName: callType === 'campaign' ? `Campaign ${hangupData.campId}` : null
-        });
-        
-        // Create immediate billingHistory entries for all call types
-        // (Incoming calls can be aggregated later if needed, but also create individual entries)
-        if (callType === 'testcall' || callType === 'campaign' || callType === 'incoming') {
+          // Update client balance immediately
+          await clientCollection.updateOne(
+            { _id: new ObjectId(clientId) },
+            { $set: { availableBalance: newBalance } }
+          );
+          
+          // Create billingHistory entry for immediate billing
+          const billingHistoryCollection = database.collection("billingHistory");
+          
           const billingDescription = callType === 'testcall' 
             ? `Test call to ${hangupData.To} for ${duration} seconds`
-            : callType === 'incoming'
-            ? `Incoming call from ${hangupData.From} for ${duration} seconds`
-            : `Campaign call to ${hangupData.To} for ${duration} seconds (${hangupData.campId})`;
+            : `Incoming call from ${hangupData.From} for ${duration} seconds`;
             
-          const campName = callType === 'testcall' 
-            ? 'Test Call' 
-            : callType === 'incoming'
-            ? 'Incoming Call'
-            : `Campaign ${hangupData.campId}`;
-          
-          // Create billing history entry
-          const database = mongoClient.db("talkGlimpass");
-          const billingHistoryCollection = database.collection("billingHistory");
+          const campName = callType === 'testcall' ? 'Test Call' : 'Incoming Call';
           
           const billingEntry = {
             clientId: clientId,
             camp_name: campName,
-            campaignId: callType === 'campaign' ? hangupData.campId : '',
+            campaignId: '',
             balanceCount: -creditsToDeduct, // Negative for deductions
             date: new Date(),
             desc: billingDescription,
@@ -1481,22 +1481,37 @@ router.post('/hangup-url', async (req, res) => {
           };
           
           const historyResult = await billingHistoryCollection.insertOne(billingEntry);
-          console.log(`✅ ${callType} billing history entry created: ${historyResult.insertedId}`);
-        }
-        
-        // Broadcast balance update via SSE
-        if (billingRouter.broadcastBalanceUpdate) {
-          try {
-            console.log(`📡 Broadcasting balance update: ${clientId} -> ${newBalance} credits`);
-            billingRouter.broadcastBalanceUpdate(clientId, newBalance, 'call_end');
-          } catch (error) {
-            console.warn('Failed to broadcast balance update:', error.message);
+          console.log(`✅ billingHistory entry created: ${historyResult.insertedId}`);
+          
+          // Save detailed call record for non-campaign calls
+          await saveCallBillingDetail({
+            clientId: clientId,
+            callUuid: hangupData.CallUUID,
+            duration: duration,
+            type: callType,
+            from: hangupData.From,
+            to: hangupData.To,
+            credits: creditsToDeduct,
+            aiCredits: 0,
+            telephonyCredits: creditsToDeduct,
+            campaignId: null,
+            campaignName: null
+          });
+          
+          // Broadcast balance update via SSE for immediate billing
+          if (billingRouter.broadcastBalanceUpdate) {
+            try {
+              console.log(`📡 Broadcasting balance update: ${clientId} -> ${newBalance} credits`);
+              billingRouter.broadcastBalanceUpdate(clientId, newBalance, 'call_end');
+            } catch (error) {
+              console.warn('Failed to broadcast balance update:', error.message);
+            }
+          } else {
+            console.warn('⚠️ SSE broadcast function not available');
           }
-        } else {
-          console.warn('⚠️ SSE broadcast function not available');
+          
+          console.log(`✅ Immediate billing completed: ${creditsToDeduct} credits deducted, new balance: ${newBalance}`);
         }
-        
-        console.log(`✅ NEW Billing processed: ${creditsToDeduct} credits deducted (${callType}), new balance: ${newBalance}`);
         
       } catch (billingError) {
         console.error(`❌ NEW Billing failed:`, billingError);

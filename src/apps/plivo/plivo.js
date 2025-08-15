@@ -466,13 +466,18 @@ async function getReportByCampId(campId) {
     campDuration = 0
   }
   
-  // DEPRECATED: Old billing system removed - campaigns now billed per call via hangup webhook
-  // Individual calls are billed in real-time via the hangup webhook using NEW billing system
-  // Campaign completion no longer triggers separate billing - all done per call
-  if(campaignStatus === 'completed' && !isBalanceUpdated){
-    // Just mark as balance updated to prevent future old billing calls
-    updateCampaignBalanceStatus(campId, true)
-    console.log(`✅ Campaign ${campaignName} completed - billing handled per call via NEW system`);
+  // UPDATED: Campaign-level aggregate billing for ALL final states
+  // Individual campaign calls are NOT billed during hangup - only when campaign ends
+  // This ensures EVERY campaign gets exactly ONE billing entry regardless of outcome
+  const finalCampaignStates = ['completed', 'cancelled', 'failed'];
+  if(finalCampaignStates.includes(campaignStatus) && !isBalanceUpdated){
+    try {
+      await processCampaignAggregatedBilling(campId, campaignName, reportData, clientId, campaignStatus);
+      updateCampaignBalanceStatus(campId, true);
+      console.log(`✅ Campaign ${campaignName} (${campaignStatus}) - aggregate billing processed`);
+    } catch (error) {
+      console.error(`❌ Error processing campaign aggregate billing for ${campId} (${campaignStatus}):`, error);
+    }
   }
   
   // Add campaign status to the response
@@ -1131,6 +1136,96 @@ async function getContactsFromList(number, listId) {
   } catch (error) {
     console.error("Error fetching matching contacts:", error);
     return { status: 500, data: error };
+  }
+}
+
+// Process campaign-level aggregate billing when campaign ends (completed/cancelled/failed)
+async function processCampaignAggregatedBilling(campaignId, campaignName, reportData, clientId, campaignStatus = 'completed') {
+  try {
+    await connectToMongo();
+    const database = client.db("talkGlimpass");
+    const clientCollection = database.collection("client");
+    const billingHistoryCollection = database.collection("billingHistory");
+    
+    // Calculate total duration from all calls in the campaign (may be 0)
+    const totalDuration = reportData.totalDuration || 0;
+    const totalCreditsToDeduct = totalDuration; // 1 second = 1 credit
+    const callCount = reportData.data ? reportData.data.length : 0;
+    
+    console.log(`💰 Processing campaign ${campaignStatus} billing for ${campaignName}: ${totalCreditsToDeduct} credits (${totalDuration}s total, ${callCount} calls)`);
+    
+    // Get current client balance
+    const existingClient = await clientCollection.findOne({ _id: new ObjectId(clientId) });
+    if (!existingClient) {
+      throw new Error(`Client not found: ${clientId}`);
+    }
+    
+    const currentBalance = existingClient.availableBalance || 0;
+    const newBalance = currentBalance - totalCreditsToDeduct;
+    
+    // Always update client balance (even if deduction is 0) and create billing entry
+    await clientCollection.updateOne(
+      { _id: new ObjectId(clientId) },
+      { $set: { availableBalance: newBalance } }
+    );
+    
+    // Generate appropriate description based on campaign outcome
+    let description, transactionType;
+    if (campaignStatus === 'completed') {
+      description = `Campaign completed: ${campaignName} - ${callCount} calls, ${totalDuration} seconds total`;
+      transactionType = 'Dr'; // Debit (even if 0)
+    } else if (campaignStatus === 'cancelled') {
+      description = `Campaign cancelled: ${campaignName} - ${callCount} calls processed before cancellation, ${totalDuration} seconds total`;
+      transactionType = 'Dr'; // Debit for usage before cancellation
+    } else if (campaignStatus === 'failed') {
+      description = `Campaign failed: ${campaignName} - ${callCount} calls processed before failure, ${totalDuration} seconds total`;
+      transactionType = 'Dr'; // Debit for usage before failure
+    } else {
+      description = `Campaign ended (${campaignStatus}): ${campaignName} - ${callCount} calls, ${totalDuration} seconds total`;
+      transactionType = 'Dr';
+    }
+    
+    // Create single aggregate billing history entry for the entire campaign (ALWAYS)
+    const billingEntry = {
+      clientId: clientId,
+      camp_name: campaignName,
+      campaignId: campaignId,
+      balanceCount: -totalCreditsToDeduct, // Negative for deductions (may be 0)
+      date: new Date(),
+      desc: description,
+      transactionType: transactionType,
+      newAvailableBalance: newBalance,
+      callUUID: null, // Not applicable for aggregate entry
+      callDuration: totalDuration,
+      callType: 'campaign_aggregate',
+      from: null, // Not applicable for aggregate
+      to: null // Not applicable for aggregate
+    };
+    
+    const historyResult = await billingHistoryCollection.insertOne(billingEntry);
+    console.log(`✅ Campaign aggregate billing entry created: ${historyResult.insertedId}`);
+    
+    // Broadcast balance update via SSE (always, even if 0 deduction)
+    if (broadcastBalanceUpdate && typeof broadcastBalanceUpdate === 'function') {
+      try {
+        console.log(`📡 Broadcasting campaign ${campaignStatus} balance update: ${clientId} -> ${newBalance} credits`);
+        broadcastBalanceUpdate(clientId, newBalance, `campaign_${campaignStatus}`);
+      } catch (error) {
+        console.warn(`Failed to broadcast campaign ${campaignStatus} balance update:`, error.message);
+      }
+    }
+    
+    console.log(`✅ Campaign aggregate billing completed (${campaignStatus}): ${totalCreditsToDeduct} credits deducted, new balance: ${newBalance}`);
+    
+    return {
+      success: true,
+      creditsDeducted: totalCreditsToDeduct,
+      newBalance: newBalance
+    };
+    
+  } catch (error) {
+    console.error('❌ Error in campaign aggregate billing:', error);
+    throw error;
   }
 }
 

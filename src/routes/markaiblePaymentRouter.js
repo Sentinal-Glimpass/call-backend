@@ -48,15 +48,7 @@ const validationSchemas = {
         validate: 'isValidMongoId',
         sanitize: 'sanitizeString'
       },
-      credits: {
-        required: true,
-        validate: 'isValidPositiveInteger'
-      },
       rupees: {
-        required: true,
-        validate: 'isValidPositiveNumber'
-      },
-      newAvailableBalance: {
         required: true,
         validate: 'isValidPositiveNumber'
       },
@@ -67,14 +59,26 @@ const validationSchemas = {
         maxLength: 100
       },
       razorpay_order_id: {
-        required: false,
+        required: true,
         sanitize: 'sanitizeString',
         maxLength: 100
       },
       razorpay_signature: {
-        required: false,
+        required: true,
         sanitize: 'sanitizeString',
         maxLength: 200
+      },
+      baseAmount: {
+        required: false,
+        validate: 'isValidPositiveNumber'
+      },
+      gstAmount: {
+        required: false,
+        validate: 'isValidPositiveNumber'
+      },
+      totalAmount: {
+        required: false,
+        validate: 'isValidPositiveNumber'
       }
     }
   }),
@@ -115,11 +119,6 @@ const calculateCreditsFromRupees = (rupees) => {
   return Math.floor((rupees / COST_PER_MINUTE_RUPEES) * SECONDS_PER_MINUTE);
 };
 
-// Helper function to validate credit calculation
-const validateCreditCalculation = (rupees, credits) => {
-  const expectedCredits = calculateCreditsFromRupees(rupees);
-  return credits === expectedCredits;
-};
 
 // Verify Razorpay payment signature
 const verifyPaymentSignature = (orderId, paymentId, signature, secret) => {
@@ -169,39 +168,47 @@ const verifyPaymentWithRazorpay = async (paymentId) => {
  *             type: object
  *             required:
  *               - clientId
- *               - credits
  *               - rupees
- *               - newAvailableBalance
  *               - razorpay_payment_id
+ *               - razorpay_order_id
+ *               - razorpay_signature
  *             properties:
  *               clientId:
  *                 type: string
  *                 description: MongoDB ObjectId of the client
  *                 example: "64f8a1b2c3d4e5f6789012ab"
- *               credits:
- *                 type: number
- *                 description: Number of credits to add (60 credits = ₹10)
- *                 example: 600
  *               rupees:
  *                 type: number
- *                 description: Amount paid in rupees
+ *                 description: Amount paid in rupees (excluding GST)
  *                 example: 100
- *               newAvailableBalance:
- *                 type: number
- *                 description: New total balance after addition
- *                 example: 1600
  *               razorpay_payment_id:
  *                 type: string
  *                 description: Razorpay payment ID
  *                 example: "pay_ABC123XYZ789"
  *               razorpay_order_id:
  *                 type: string
- *                 description: Razorpay order ID (optional)
+ *                 description: Razorpay order ID (required)
  *                 example: "order_ABC123XYZ789"
  *               razorpay_signature:
  *                 type: string
- *                 description: Razorpay signature for verification (optional)
+ *                 description: Razorpay signature for verification (required)
  *                 example: "abc123..."
+ *               baseAmount:
+ *                 type: number
+ *                 description: Base amount before GST (optional)
+ *                 example: 100
+ *               gstAmount:
+ *                 type: number
+ *                 description: GST amount (optional)
+ *                 example: 18
+ *               totalAmount:
+ *                 type: number
+ *                 description: Total amount including GST (optional)
+ *                 example: 118
+ *               credits:
+ *                 type: number
+ *                 description: Number of credits (ignored - calculated based on rupees)
+ *                 example: 600
  *     responses:
  *       200:
  *         description: Payment verified and balance added successfully
@@ -234,21 +241,30 @@ router.post('/verify-and-add-balance', authenticateToken, validateResourceOwners
   try {
     const {
       clientId,
-      credits,
-      rupees,
-      newAvailableBalance,
+      rupees,  // Amount excluding GST
       razorpay_payment_id,
       razorpay_order_id,
-      razorpay_signature
+      razorpay_signature,
+      baseAmount,
+      gstAmount,
+      totalAmount
+      // Explicitly ignore newAvailableBalance from frontend
     } = req.body;
+
+    // Calculate credits based on rupees (excluding GST)
+    const credits = calculateCreditsFromRupees(rupees);
 
     // Debug: Log what we received from frontend
     console.log('Received payment verification request:', {
       clientId,
-      credits,
       rupees,
-      newAvailableBalance,
-      razorpay_payment_id
+      calculatedCredits: credits,
+      razorpay_payment_id,
+      razorpay_order_id,
+      razorpay_signature,
+      baseAmount,
+      gstAmount,
+      totalAmount
     });
 
     // STEP 1: Check if payment ID has already been used (Prevent replay attacks)
@@ -274,38 +290,31 @@ router.post('/verify-and-add-balance', authenticateToken, validateResourceOwners
     }
 
     // STEP 3: Verify payment amount matches request
-    if (paymentVerification.amount !== rupees) {
+    // Use totalAmount (with GST) if provided, otherwise use rupees
+    const expectedAmount = totalAmount || rupees;
+    if (paymentVerification.amount !== expectedAmount) {
       return res.status(400).json({
         success: false,
-        message: `Payment amount mismatch. Paid: ₹${paymentVerification.amount}, Expected: ₹${rupees}`
+        message: `Payment amount mismatch. Paid: ₹${paymentVerification.amount}, Expected: ₹${expectedAmount}`
       });
     }
 
-    // STEP 4: Verify payment signature (if provided)
-    if (razorpay_order_id && razorpay_signature) {
-      const isValidSignature = verifyPaymentSignature(
-        razorpay_order_id,
-        razorpay_payment_id,
-        razorpay_signature,
-        process.env.RAZORPAY_KEY_SECRET
-      );
+    // STEP 4: Verify payment signature (required)
+    const isValidSignature = verifyPaymentSignature(
+      razorpay_order_id,
+      razorpay_payment_id,
+      razorpay_signature,
+      process.env.RAZORPAY_KEY_SECRET
+    );
 
-      if (!isValidSignature) {
-        return res.status(400).json({
-          success: false,
-          message: 'Invalid payment signature'
-        });
-      }
-    }
-
-    // STEP 5: Validate the conversion rate using environment variable
-    if (!validateCreditCalculation(rupees, credits)) {
-      const expectedCredits = calculateCreditsFromRupees(rupees);
+    if (!isValidSignature) {
       return res.status(400).json({
         success: false,
-        message: `Invalid credit calculation. Expected ${expectedCredits} credits for ₹${rupees} (Rate: ₹${COST_PER_MINUTE_RUPEES}/minute)`
+        message: 'Invalid payment signature'
       });
     }
+
+    // STEP 5: Credits are already calculated based on rupees (excluding GST)
 
     console.log('Payment verified successfully:', {
       paymentId: razorpay_payment_id,
@@ -334,19 +343,7 @@ router.post('/verify-and-add-balance', authenticateToken, validateResourceOwners
       }
     }
 
-    // Prepare payload for the billing API (matching expected format)
-    const billingPayload = {
-      clientId: clientId,
-      balance: credits,
-      transactionType: "Cr",
-      desc: `Recharge: Razorpay payment of ${rupees} rupees`,
-      newAvailableBalance: newAvailableBalance, // Use frontend-calculated balance
-      date: new Date().toISOString(),
-      camp_name: null,
-      campaignId: null
-    };
-
-    // STEP 7: Get current client data directly from database
+    // STEP 6: Get current client data to calculate new balance
     console.log('Getting current client data from database...');
     const currentClientData = await getClientByClientId(clientId);
     
@@ -357,15 +354,40 @@ router.post('/verify-and-add-balance', authenticateToken, validateResourceOwners
       });
     }
     
-    console.log('Client data retrieved:', { clientId, currentBalance: currentClientData.availableBalance });
+    // Calculate new balance server-side
+    const currentBalance = currentClientData.availableBalance || 0;
+    const newAvailableBalance = currentBalance + credits;
     
-    // STEP 8: Update client balance directly in database
+    console.log('🔢 Balance Calculation Debug:', { 
+      clientId, 
+      currentBalance, 
+      creditsToAdd: credits, 
+      calculation: `${currentBalance} + ${credits} = ${newAvailableBalance}`,
+      frontendSentBalance: req.body.newAvailableBalance,
+      usingServerCalculated: newAvailableBalance
+    });
+
+    // Prepare payload for the billing API (matching expected format)
+    const billingPayload = {
+      clientId: clientId,
+      balance: credits,
+      transactionType: "Cr",
+      desc: `Recharge: Razorpay payment of ${rupees} rupees`,
+      newAvailableBalance: newAvailableBalance, // Use server-calculated balance
+      date: new Date().toISOString(),
+      camp_name: null,
+      campaignId: null
+    };
+
+    // STEP 7: Update client balance directly in database
     const updatedClientData = {
       ...currentClientData,
       availableBalance: newAvailableBalance,
       lastPaymentDate: new Date().toISOString(),
       lastPaymentAmount: rupees,
-      lastPaymentId: razorpay_payment_id
+      lastPaymentId: razorpay_payment_id,
+      lastOrderId: razorpay_order_id,
+      lastPaymentSignature: razorpay_signature
     };
     
     console.log('Updating client with new balance:', newAvailableBalance);
@@ -385,19 +407,43 @@ router.post('/verify-and-add-balance', authenticateToken, validateResourceOwners
     console.log('Adding billing record...');
     
     try {
+      // Create extended billing payload with all payment details
+      const extendedBillingPayload = {
+        camp_name: billingPayload.camp_name,
+        clientId: billingPayload.clientId,
+        balance: billingPayload.balance,
+        date: billingPayload.date,
+        campaignId: billingPayload.campaignId,
+        desc: `Recharge: Razorpay payment of ${rupees} rupees (excluding GST)`,
+        transactionType: billingPayload.transactionType,
+        newAvailableBalance: billingPayload.newAvailableBalance,
+        paymentId: razorpay_payment_id,
+        orderId: razorpay_order_id,
+        paymentSignature: razorpay_signature,
+        paymentProvider: 'Razorpay',
+        baseAmount: baseAmount || rupees,
+        gstAmount: gstAmount || 0,
+        totalAmount: totalAmount || rupees
+      };
+      
       await addBillingHistoryInMongo(
-        billingPayload.camp_name,
-        billingPayload.clientId,
-        billingPayload.balance,
-        billingPayload.date,
-        billingPayload.campaignId,
-        billingPayload.desc,
-        billingPayload.transactionType,
-        billingPayload.newAvailableBalance,
-        razorpay_payment_id,
-        'Razorpay'
+        extendedBillingPayload.camp_name,
+        extendedBillingPayload.clientId,
+        extendedBillingPayload.balance,
+        extendedBillingPayload.date,
+        extendedBillingPayload.campaignId,
+        extendedBillingPayload.desc,
+        extendedBillingPayload.transactionType,
+        extendedBillingPayload.newAvailableBalance,
+        extendedBillingPayload.paymentId,
+        extendedBillingPayload.paymentProvider
       );
-      console.log('Billing record added successfully with payment tracking');
+      console.log('Billing record added successfully with payment tracking:', {
+        paymentId: razorpay_payment_id,
+        orderId: razorpay_order_id,
+        amount: rupees,
+        credits: credits
+      });
     } catch (billingError) {
       console.error('Billing record failed (non-critical):', billingError);
       // Don't fail the payment if billing fails - the balance is already updated

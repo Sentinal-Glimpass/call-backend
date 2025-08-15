@@ -125,3 +125,63 @@ let rateLimitStartTime = Date.now();
 - Replace per-campaign rate limiting with global system limit
 - Ensure serverless containers respect shared rate limits
 - Better resource management across all campaigns
+
+## Concurrency Race Condition Fix
+
+### Problem: Race Condition in Concurrency Checking
+
+**Current Issue**: Multiple campaigns can exceed concurrency limits due to race condition between concurrency check and call tracking.
+
+**Observed Behavior**: 
+- Expected: 10 concurrent calls per client
+- Actual: 13-15 concurrent calls (30% overshoot)
+
+**Root Cause**:
+```javascript
+// Current flow has a 2-3 second gap
+1. Check concurrency: "9 calls active, OK to proceed" 
+2. Bot warmup (2-3 seconds delay)
+3. Make Plivo API call (network latency)
+4. FINALLY track the call in database
+
+// During the gap, other campaigns also pass step 1
+```
+
+**Solution: Atomic Slot Reservation**
+- Reserve concurrency slot IMMEDIATELY during check
+- Use `findOneAndUpdate` with upsert for atomic operations
+- No race conditions between concurrent containers
+
+**Implementation Challenges**:
+- ❌ **Cannot deploy mid-campaign** - Would disrupt active campaigns
+- ❌ **Requires campaign restart** - All running campaigns need to stop
+- ✅ **Database-driven approach** - Works in serverless environment
+
+**Proposed Atomic Implementation**:
+```javascript
+// New atomic approach
+async function atomicSlotReservation(clientId, callData) {
+  // Atomically reserve slot by inserting call record immediately
+  const result = await activeCallsCollection.insertOne({
+    ...callData,
+    status: 'processed', // Reserve slot right away
+    clientId: new ObjectId(clientId)
+  });
+  
+  // Then do bot warmup & Plivo call
+  // Update record with CallUUID after call succeeds
+}
+```
+
+**Deployment Strategy**:
+1. Wait for all current campaigns to complete
+2. Deploy atomic concurrency fix 
+3. Start new campaigns with proper concurrency limits
+
+**Benefits**:
+- Exact concurrency enforcement (no overshoot)
+- Serverless-safe atomic operations
+- Better resource management
+- Eliminates race conditions
+
+**Note**: This is a **breaking change** that requires coordinated deployment when no campaigns are running.
