@@ -894,6 +894,36 @@ async function getSingleCampaignDetails(camp_id) {
 async function makeCallViaCampaign(listId, fromNumber, wssUrl, campaignName, clientId) {
   try {
       const listData = await getlistDataById(listId);
+      const contactCount = listData.length;
+      
+      // Estimate campaign cost (average 30 seconds per call)
+      const estimatedSecondsPerCall = parseInt(process.env.ESTIMATED_CALL_DURATION) || 30;
+      const estimatedCost = contactCount * estimatedSecondsPerCall; // 1 second = 1 credit
+      
+      console.log(`💰 Campaign cost estimation: ${contactCount} contacts × ${estimatedSecondsPerCall}s = ${estimatedCost} credits`);
+      
+      // Validate client balance before creating campaign
+      const balanceCheck = await validateClientBalance(clientId, estimatedCost);
+      
+      if (!balanceCheck.canStart) {
+          console.log(`❌ Campaign blocked: ${balanceCheck.message}`);
+          return {
+              status: 400,
+              message: balanceCheck.message,
+              balance: balanceCheck.balance,
+              estimatedCost: estimatedCost,
+              contactCount: contactCount
+          };
+      }
+      
+      if (!balanceCheck.canAfford) {
+          console.log(`⚠️ Campaign warning: ${balanceCheck.message}`);
+          // Allow campaign to start but warn about insufficient funds
+          console.log(`📊 Campaign will proceed but may pause when balance exhausts`);
+      } else {
+          console.log(`✅ Balance validation passed: ${balanceCheck.balance} credits available for ${estimatedCost} estimated cost`);
+      }
+      
       const result = await createCampaign(campaignName, listId, fromNumber, wssUrl, clientId, false, false);
       if (result === 0) {
           return { status: 500, message: 'Error while creating the campaign' };
@@ -1012,6 +1042,30 @@ async function processEnhancedCampaign(campaignId, listData, fromNumber, wssUrl,
         console.log(`⚠️ Campaign status changed to ${campaignState.status}: ${campaignId}`);
         await updateCampaignProgress(campaignId, i);
         break;
+      }
+      
+      // BALANCE CHECK: Pause campaign if balance falls to zero or below
+      const balanceResult = await getCurrentClientBalance(clientId);
+      if (balanceResult.success && balanceResult.balance <= 0) {
+        console.log(`💰 Balance insufficient (${balanceResult.balance} credits) - pausing campaign at contact ${i + 1}/${listData.length}`);
+        
+        // Pause the campaign due to insufficient balance
+        const pauseResult = await pauseCampaign(campaignId);
+        if (pauseResult.success) {
+          console.log(`⏸️ Campaign auto-paused due to insufficient balance: ${campaignId}`);
+          
+          // Update campaign with pause reason
+          await updateCampaignPauseReason(campaignId, 'insufficient_balance', balanceResult.balance);
+          
+          // Update current position where we paused
+          await updateCampaignProgress(campaignId, i);
+          break;
+        } else {
+          console.error(`❌ Failed to auto-pause campaign: ${pauseResult.error}`);
+          // Continue but log the issue
+        }
+      } else if (balanceResult.success) {
+        console.log(`💰 Balance check passed: ${balanceResult.balance} credits available`);
       }
       
       const contact = listData[i];
@@ -1139,6 +1193,110 @@ async function getContactsFromList(number, listId) {
   }
 }
 
+// Balance validation functions for campaign management
+async function validateClientBalance(clientId, estimatedCost = 0) {
+  try {
+    await connectToMongo();
+    const database = client.db("talkGlimpass");
+    const clientCollection = database.collection("client");
+    
+    const clientDoc = await clientCollection.findOne({ _id: new ObjectId(clientId) });
+    if (!clientDoc) {
+      return {
+        success: false,
+        error: 'Client not found',
+        balance: 0
+      };
+    }
+    
+    const currentBalance = clientDoc.availableBalance || 0;
+    const hasValidBalance = currentBalance > 0; // Must have positive balance to start
+    const canAffordEstimate = estimatedCost === 0 || currentBalance >= estimatedCost;
+    
+    return {
+      success: hasValidBalance, // Only require positive balance to start
+      balance: currentBalance,
+      estimatedCost: estimatedCost,
+      deficit: estimatedCost > currentBalance ? (estimatedCost - currentBalance) : 0,
+      canStart: hasValidBalance,
+      canAfford: canAffordEstimate,
+      message: !hasValidBalance ? 'Insufficient balance: Balance must be positive to start' :
+               !canAffordEstimate ? `Warning: Need ${estimatedCost} credits, have ${currentBalance} (campaign will pause when balance exhausts)` :
+               'Balance validation passed'
+    };
+  } catch (error) {
+    console.error('❌ Error validating client balance:', error);
+    return {
+      success: false,
+      error: error.message,
+      balance: 0
+    };
+  }
+}
+
+async function getCurrentClientBalance(clientId) {
+  try {
+    await connectToMongo();
+    const database = client.db("talkGlimpass");
+    const clientCollection = database.collection("client");
+    
+    const clientDoc = await clientCollection.findOne({ _id: new ObjectId(clientId) });
+    if (!clientDoc) {
+      return { success: false, balance: 0, error: 'Client not found' };
+    }
+    
+    return {
+      success: true,
+      balance: clientDoc.availableBalance || 0,
+      client: clientDoc
+    };
+  } catch (error) {
+    console.error('❌ Error getting client balance:', error);
+    return { success: false, balance: 0, error: error.message };
+  }
+}
+
+// Update all callBillingDetails entries for a campaign with actual credits
+async function updateCampaignCallCredits(campaignId, totalCost, totalDuration) {
+  try {
+    await connectToMongo();
+    const database = client.db("talkGlimpass");
+    const { saveCallBillingDetail } = require('./billing/billingCore');
+    
+    // Calculate credit per second for this campaign
+    const creditPerSecond = totalDuration > 0 ? totalCost / totalDuration : 0;
+    
+    console.log(`📊 Updating callBillingDetails for campaign ${campaignId}: ${totalCost} total credits over ${totalDuration} seconds`);
+    
+    // Get all callBillingDetails entries for this campaign
+    const callBillingCollection = database.collection("callBillingDetails");
+    const campaignCalls = await callBillingCollection.find({ 
+      campaignId: campaignId,
+      type: 'campaign'
+    }).toArray();
+    
+    // Update each call with proportional credits
+    for (const call of campaignCalls) {
+      const callCredits = call.duration * creditPerSecond;
+      await callBillingCollection.updateOne(
+        { _id: call._id },
+        { 
+          $set: { 
+            credits: callCredits,
+            telephonyCredits: callCredits,
+            updatedAt: new Date()
+          } 
+        }
+      );
+    }
+    
+    console.log(`✅ Updated ${campaignCalls.length} callBillingDetails entries with actual credits`);
+    
+  } catch (error) {
+    console.error('❌ Error updating campaign call credits:', error);
+  }
+}
+
 // Process campaign-level aggregate billing when campaign ends (completed/cancelled/failed)
 async function processCampaignAggregatedBilling(campaignId, campaignName, reportData, clientId, campaignStatus = 'completed') {
   try {
@@ -1152,22 +1310,18 @@ async function processCampaignAggregatedBilling(campaignId, campaignName, report
     const totalCreditsToDeduct = totalDuration; // 1 second = 1 credit
     const callCount = reportData.data ? reportData.data.length : 0;
     
-    console.log(`💰 Processing campaign ${campaignStatus} billing for ${campaignName}: ${totalCreditsToDeduct} credits (${totalDuration}s total, ${callCount} calls)`);
+    console.log(`📋 Processing campaign ${campaignStatus} billing history for ${campaignName}: ${totalCreditsToDeduct} credits (${totalDuration}s total, ${callCount} calls)`);
     
-    // Get current client balance
+    // Get current client balance (for billing history record - balance already updated per call)
     const existingClient = await clientCollection.findOne({ _id: new ObjectId(clientId) });
     if (!existingClient) {
       throw new Error(`Client not found: ${clientId}`);
     }
     
     const currentBalance = existingClient.availableBalance || 0;
-    const newBalance = currentBalance - totalCreditsToDeduct;
     
-    // Always update client balance (even if deduction is 0) and create billing entry
-    await clientCollection.updateOne(
-      { _id: new ObjectId(clientId) },
-      { $set: { availableBalance: newBalance } }
-    );
+    // NOTE: Client balance is NOT updated here since it's already updated per individual call
+    console.log(`📋 Current balance (already updated per call): ${currentBalance}`);
     
     // Generate appropriate description based on campaign outcome
     let description, transactionType;
@@ -1194,7 +1348,7 @@ async function processCampaignAggregatedBilling(campaignId, campaignName, report
       date: new Date(),
       desc: description,
       transactionType: transactionType,
-      newAvailableBalance: newBalance,
+      newAvailableBalance: currentBalance, // Current balance (already updated per call)
       callUUID: null, // Not applicable for aggregate entry
       callDuration: totalDuration,
       callType: 'campaign_aggregate',
@@ -1205,22 +1359,16 @@ async function processCampaignAggregatedBilling(campaignId, campaignName, report
     const historyResult = await billingHistoryCollection.insertOne(billingEntry);
     console.log(`✅ Campaign aggregate billing entry created: ${historyResult.insertedId}`);
     
-    // Broadcast balance update via SSE (always, even if 0 deduction)
-    if (broadcastBalanceUpdate && typeof broadcastBalanceUpdate === 'function') {
-      try {
-        console.log(`📡 Broadcasting campaign ${campaignStatus} balance update: ${clientId} -> ${newBalance} credits`);
-        broadcastBalanceUpdate(clientId, newBalance, `campaign_${campaignStatus}`);
-      } catch (error) {
-        console.warn(`Failed to broadcast campaign ${campaignStatus} balance update:`, error.message);
-      }
-    }
+    // Update all callBillingDetails entries with actual credits
+    await updateCampaignCallCredits(campaignId, totalCreditsToDeduct, totalDuration);
     
-    console.log(`✅ Campaign aggregate billing completed (${campaignStatus}): ${totalCreditsToDeduct} credits deducted, new balance: ${newBalance}`);
+    // NOTE: No balance update broadcast here since individual calls already handle real-time updates
+    console.log(`✅ Campaign billing history completed (${campaignStatus}): billing entry created for ${totalCreditsToDeduct} credits. Balance already updated per call: ${currentBalance}`);
     
     return {
       success: true,
       creditsDeducted: totalCreditsToDeduct,
-      newBalance: newBalance
+      newBalance: currentBalance // Current balance (already updated per call)
     };
     
   } catch (error) {
@@ -1536,6 +1684,30 @@ async function updateCampaignProgress(campaignId, currentIndex) {
     console.log(`📊 Campaign ${campaignId}: Updated position to ${currentIndex}`);
   } catch (error) {
     console.error(`❌ Error updating campaign progress: ${campaignId}`, error);
+  }
+}
+
+async function updateCampaignPauseReason(campaignId, reason, additionalInfo = null) {
+  try {
+    await connectToMongo();
+    const database = client.db("talkGlimpass");
+    const collection = database.collection("plivoCampaign");
+    
+    const updateData = {
+      pauseReason: reason,
+      pauseAdditionalInfo: additionalInfo,
+      pausedAt: new Date(),
+      lastActivity: new Date()
+    };
+    
+    await collection.updateOne(
+      { _id: new ObjectId(campaignId) },
+      { $set: updateData }
+    );
+    
+    console.log(`📊 Campaign ${campaignId}: Updated pause reason to ${reason} (${additionalInfo})`);
+  } catch (error) {
+    console.error(`❌ Error updating campaign pause reason: ${campaignId}`, error);
   }
 }
 
@@ -1915,6 +2087,9 @@ async function getCampaignProgress(campaignId) {
     
     console.log(`🔥 CRITICAL BUG: Campaign ${campaignId} has ${totalRecords} total records, but all showing as 'completed': ${JSON.stringify(counts)}`);
     
+    // NOTE: Aggregate billing is handled by getReportByCampId() only
+    // getCampaignProgress() is for status checking, not billing
+    
     return {
       success: true,
       campaignId: campaignId,
@@ -2024,5 +2199,8 @@ async function getTestCallReport(clientId) {
     resumeCampaign,
     getCampaignProgress,
     getCampaignState,
-    processEnhancedCampaign
+    processEnhancedCampaign,
+    // Balance validation functions
+    validateClientBalance,
+    getCurrentClientBalance
   }

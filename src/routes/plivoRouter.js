@@ -52,7 +52,7 @@ const {
  *   name: Plivo
  *   description: Plivo SMS/voice operations and campaign management
  */
-const{ retryCampaign, getIncomingBilling,  updateIncomingClientBalance, getCampaignStatus, getContactsFromList, insertList, getIncomingReport, getContactfromListId, saveHangupData, insertListContent, updateList, getListByClientId, initiatePlivoCall, makeCallViaCampaign, getCampaignByClientId, saveRecordData, getReportByCampId, deleteList, cancelCampaign, pauseCampaign, resumeCampaign, getCampaignProgress, getTestCallReport} = require('../apps/plivo/plivo');
+const{ retryCampaign, getIncomingBilling,  updateIncomingClientBalance, getCampaignStatus, getContactsFromList, insertList, getIncomingReport, getContactfromListId, saveHangupData, insertListContent, updateList, getListByClientId, initiatePlivoCall, makeCallViaCampaign, getCampaignByClientId, saveRecordData, getReportByCampId, deleteList, cancelCampaign, pauseCampaign, resumeCampaign, getCampaignProgress, getTestCallReport, validateClientBalance, getCurrentClientBalance} = require('../apps/plivo/plivo');
 
 // Validation schemas for Plivo endpoints
 const validationSchemas = {
@@ -480,6 +480,30 @@ router.post('/get-list-contact', authenticateToken, validateResourceOwnership, a
 router.post('/single-call', authenticateToken, validateResourceOwnership, validationSchemas.singleCallValidation, auditLog, async(req, res) =>{
     try{
         const { from, to, wssUrl, clientId, assistantId, customPrompt } = req.body;
+        
+        // Validate client balance before making test call - simple <= 0 check
+        const balanceCheck = await getCurrentClientBalance(clientId);
+        
+        if (!balanceCheck.success) {
+            console.log(`❌ Test call blocked: ${balanceCheck.error}`);
+            return res.status(400).json({
+                success: false,
+                message: balanceCheck.error,
+                callType: 'test_call'
+            });
+        }
+        
+        if (balanceCheck.balance <= 0) {
+            console.log(`❌ Test call blocked: Insufficient balance (${balanceCheck.balance} credits)`);
+            return res.status(400).json({
+                success: false,
+                message: 'Insufficient balance: Balance must be positive to make test call',
+                balance: balanceCheck.balance,
+                callType: 'test_call'
+            });
+        }
+        
+        console.log(`✅ Balance validation passed for test call: ${balanceCheck.balance} credits available`);
         
         // For single calls (test calls), we mark them as 'testcall' instead of using camp_id
         // Test calls are for testing purposes only and don't have campaign IDs
@@ -1418,51 +1442,47 @@ router.post('/hangup-url', async (req, res) => {
         console.log(`💰 NEW Billing: ${callType} call - ${creditsToDeduct} credits (duration: ${duration}s)`);
         console.log(`💰 Current Balance: ${currentBalance}`);
         
-        // CORRECTED LOGIC: Campaign calls vs Non-campaign calls
-        if (callType === 'campaign') {
-          console.log(`📋 Campaign call - NO billing/balance update, only call tracking`);
-          
-          // For campaign calls: ONLY save call details for tracking, NO billing/balance updates
-          await saveCallBillingDetail({
-            clientId: clientId,
-            callUuid: hangupData.CallUUID,
-            duration: duration,
-            type: callType,
-            from: hangupData.From,
-            to: hangupData.To,
-            credits: 0, // Will be aggregated when campaign completes
-            aiCredits: 0,
-            telephonyCredits: 0, // Will be aggregated when campaign completes
-            campaignId: hangupData.campId,
-            campaignName: `Campaign ${hangupData.campId}`
-          });
-          
-          console.log(`✅ Campaign call tracked (no billing): ${hangupData.CallUUID}`);
-          
-        } else {
-          // For incoming and test calls: immediate billing as before
-          console.log(`💰 Immediate billing: ${currentBalance} -> ${currentBalance - creditsToDeduct}`);
-          
-          const { connectToMongo, client: mongoClient } = require('../../models/mongodb.js');
-          await connectToMongo();
-          const database = mongoClient.db("talkGlimpass");
-          const clientCollection = database.collection("client");
-          const { ObjectId } = require('mongodb');
+        // UPDATED BILLING LOGIC: Balance updates for ALL calls, but billing history only for non-campaign calls
+        console.log(`💰 Processing call billing: ${currentBalance} -> ${newBalance}`);
         
-          // Update client balance immediately
-          await clientCollection.updateOne(
-            { _id: new ObjectId(clientId) },
-            { $set: { availableBalance: newBalance } }
-          );
-          
-          // Create billingHistory entry for immediate billing
+        // Update client balance immediately for ALL call types (including campaign calls)
+        const { connectToMongo, client: mongoClient } = require('../../models/mongodb.js');
+        await connectToMongo();
+        const database = mongoClient.db("talkGlimpass");
+        const clientCollection = database.collection("client");
+        const { ObjectId } = require('mongodb');
+      
+        // Update client balance immediately for ALL calls (real-time balance updates)
+        await clientCollection.updateOne(
+          { _id: new ObjectId(clientId) },
+          { $set: { availableBalance: newBalance } }
+        );
+        
+        // Broadcast balance update via SSE for ALL calls (including campaign calls)
+        if (billingRouter.broadcastBalanceUpdate) {
+          try {
+            console.log(`📡 Broadcasting individual call balance update: ${clientId} -> ${newBalance} credits (Call Type: ${callType})`);
+            billingRouter.broadcastBalanceUpdate(clientId, newBalance, 'call_end');
+          } catch (error) {
+            console.warn('Failed to broadcast balance update:', error.message);
+          }
+        } else {
+          console.warn('⚠️ SSE broadcast function not available');
+        }
+        
+        // BILLING HISTORY: Only for non-campaign calls (incoming, test calls)
+        // Campaign calls get billing history entries only at campaign completion
+        if (callType !== 'campaign') {
           const billingHistoryCollection = database.collection("billingHistory");
           
-          const billingDescription = callType === 'testcall' 
-            ? `Test call to ${hangupData.To} for ${duration} seconds`
-            : `Incoming call from ${hangupData.From} for ${duration} seconds`;
-            
-          const campName = callType === 'testcall' ? 'Test Call' : 'Incoming Call';
+          let billingDescription, campName;
+          if (callType === 'testcall') {
+            billingDescription = `Test call to ${hangupData.To} for ${duration} seconds`;
+            campName = 'Test Call';
+          } else {
+            billingDescription = `Incoming call from ${hangupData.From} for ${duration} seconds`;
+            campName = 'Incoming Call';
+          }
           
           const billingEntry = {
             clientId: clientId,
@@ -1481,37 +1501,29 @@ router.post('/hangup-url', async (req, res) => {
           };
           
           const historyResult = await billingHistoryCollection.insertOne(billingEntry);
-          console.log(`✅ billingHistory entry created: ${historyResult.insertedId}`);
-          
-          // Save detailed call record for non-campaign calls
-          await saveCallBillingDetail({
-            clientId: clientId,
-            callUuid: hangupData.CallUUID,
-            duration: duration,
-            type: callType,
-            from: hangupData.From,
-            to: hangupData.To,
-            credits: creditsToDeduct,
-            aiCredits: 0,
-            telephonyCredits: creditsToDeduct,
-            campaignId: null,
-            campaignName: null
-          });
-          
-          // Broadcast balance update via SSE for immediate billing
-          if (billingRouter.broadcastBalanceUpdate) {
-            try {
-              console.log(`📡 Broadcasting balance update: ${clientId} -> ${newBalance} credits`);
-              billingRouter.broadcastBalanceUpdate(clientId, newBalance, 'call_end');
-            } catch (error) {
-              console.warn('Failed to broadcast balance update:', error.message);
-            }
-          } else {
-            console.warn('⚠️ SSE broadcast function not available');
-          }
-          
-          console.log(`✅ Immediate billing completed: ${creditsToDeduct} credits deducted, new balance: ${newBalance}`);
+          console.log(`✅ billingHistory entry created for ${callType}: ${historyResult.insertedId}`);
+        } else {
+          console.log(`📋 Campaign call - balance updated but billing history deferred until campaign completion`);
         }
+        
+        // Save detailed call record for ALL calls (for tracking purposes)
+        await saveCallBillingDetail({
+          clientId: clientId,
+          callUuid: hangupData.CallUUID,
+          duration: duration,
+          type: callType,
+          from: hangupData.From,
+          to: hangupData.To,
+          credits: creditsToDeduct,
+          aiCredits: 0,
+          telephonyCredits: creditsToDeduct,
+          campaignId: callType === 'campaign' ? hangupData.campId : null,
+          campaignName: callType === 'campaign' ? `Campaign ${hangupData.campId}` : null
+        });
+        
+        console.log(`✅ Call processed: ${creditsToDeduct} credits deducted, balance updated to ${newBalance} (Call Type: ${callType})`);
+        
+        // Note: Campaign calls get real-time balance updates but billing history only at campaign end
         
       } catch (billingError) {
         console.error(`❌ NEW Billing failed:`, billingError);
