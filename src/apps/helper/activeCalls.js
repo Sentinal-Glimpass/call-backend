@@ -6,6 +6,7 @@
 const { connectToMongo, client } = require('../../../models/mongodb.js');
 const { ObjectId } = require('mongodb');
 const { warmupBotWithRetry } = require('../../utils/botWarmup.js');
+const CallProviderService = require('../../services/callProviderService');
 
 /**
  * Check client-specific concurrency limits
@@ -167,6 +168,7 @@ async function trackCallStart(callData) {
       failureReason: callData.failureReason || null,
       warmupAttempts: callData.warmupAttempts || null,
       warmupDuration: callData.warmupDuration || null,
+      provider: callData.provider || 'plivo', // NEW: Track provider used
       // Enhanced tracking for pause/resume
       contactIndex: callData.contactIndex || null,        // Position in campaign list
       sequenceNumber: callData.sequenceNumber || null,    // Unique sequence in campaign
@@ -466,10 +468,22 @@ async function processSingleCall(callParams) {
       console.log(`✅ Bot warmup successful (${warmupResult.duration}ms, ${warmupResult.attempts} attempts)`);
     }
     
-    // Step 3: Make Plivo API call first to get CallUUID
-    let plivoResult;
+    // Step 3: Make unified provider call to get CallUUID
+    let callResult;
     try {
-      plivoResult = await makePlivoCall({
+      // Validate call parameters
+      const validation = CallProviderService.validateCallParams(callParams);
+      if (!validation.valid) {
+        return {
+          success: false,
+          error: validation.error,
+          stage: 'validation'
+        };
+      }
+      
+      // Make call using unified provider service
+      callResult = await CallProviderService.makeCall({
+        clientId,
         from,
         to,
         wssUrl,
@@ -479,28 +493,30 @@ async function processSingleCall(callParams) {
         campaignId
       });
       
-      if (!plivoResult.success) {
+      if (!callResult.success) {
         return {
           success: false,
-          error: plivoResult.error,
-          stage: 'plivo_api'
+          error: callResult.error,
+          stage: 'provider_api',
+          provider: callResult.provider
         };
       }
       
-      console.log(`📞 Plivo call initiated: ${plivoResult.callUUID}`);
+      console.log(`📞 ${callResult.provider.toUpperCase()} call initiated: ${callResult.callUUID}`);
       
-    } catch (plivoError) {
-      console.error('❌ Plivo API call failed:', plivoError);
+    } catch (providerError) {
+      console.error('❌ Provider API call failed:', providerError);
       return {
         success: false,
-        error: `Plivo API error: ${plivoError.message}`,
-        stage: 'plivo_api'
+        error: `Provider API error: ${providerError.message}`,
+        stage: 'provider_api'
       };
     }
     
     // Step 4: Track call start in database with actual CallUUID
     const callData = {
-      callUUID: plivoResult.callUUID, // Now we have the real CallUUID
+      callUUID: callResult.callUUID, // Now we have the real CallUUID
+      provider: callResult.provider, // NEW: Track which provider was used
       clientId,
       campaignId,
       from,
@@ -516,19 +532,21 @@ async function processSingleCall(callParams) {
     
     const trackResult = await trackCallStart(callData);
     if (!trackResult.success) {
-      console.warn(`⚠️ Call tracking failed but Plivo call was initiated: ${plivoResult.callUUID}`);
+      console.warn(`⚠️ Call tracking failed but ${callResult.provider} call was initiated: ${callResult.callUUID}`);
       // Don't fail the entire process - the call was successfully initiated
     } else {
-      console.log(`📋 Call tracked with ID: ${trackResult.callId} (CallUUID: ${plivoResult.callUUID})`);
+      console.log(`📋 Call tracked with ID: ${trackResult.callId} (CallUUID: ${callResult.callUUID})`);
     }
     
     const totalDuration = Date.now() - startTime;
-    console.log(`✅ Call processing complete: ${plivoResult.callUUID} (${totalDuration}ms)`);
+    console.log(`✅ Call processing complete: ${callResult.callUUID} (${totalDuration}ms)`);
+    console.log(`🏷️ Provider used: ${callResult.provider.toUpperCase()}`);
     
     return {
         success: true,
         callId: trackResult?.callId || null,
-        callUUID: plivoResult.callUUID,
+        callUUID: callResult.callUUID,
+        provider: callResult.provider, // NEW: Return provider info
         processingTime: totalDuration,
         warmupTime: warmupResult.duration,
         waitTime: slotResult.waitTime

@@ -32,6 +32,8 @@ const markaibleTrainingRouter = require('./src/routes/markaibleTrainingRouter');
 const markaibleGrammarRouter = require('./src/routes/markaibleGrammarRouter');
 const markaiblePaymentRouter = require('./src/routes/markaiblePaymentRouter');
 const billingRouter = require('./src/routes/billingRouter');
+const phoneProviderRouter = require('./src/routes/phoneProviderRouter');
+const twilioRouter = require('./src/routes/twilioRouter');
 const apiKeyValidator = require('./src/middleware/apiKeyValidator')
 const { apiLogger, requestCounter } = require('./src/middleware/apiLogger')
 // const { apiLimiter } = require('./src/middleware/authMiddleware')
@@ -220,6 +222,8 @@ app.use('/api/train-ai', markaibleTrainingRouter);
 app.use('/api/grammar', markaibleGrammarRouter);
 app.use('/api/payment', markaiblePaymentRouter);
 app.use('/billing', billingRouter);
+app.use('/phone-provider', phoneProviderRouter);
+app.use('/twilio', twilioRouter);
 
 // LEGACY ROUTES - DEPRECATED (DO NOT USE)
 // app.use('/graph', creatorRouter);
