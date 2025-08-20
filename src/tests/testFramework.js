@@ -114,7 +114,7 @@ class TestFramework {
           const { warmupBotWithRetry } = require('../utils/botWarmup.js');
           
           // Test with invalid URL to check error handling
-          const result = await warmupBotWithRetry('https://invalid-bot-url.test/warmup');
+          const result = await warmupBotWithRetry('ws://invalid-bot-url.test/chat/v2/test-agent-id', 'test-agent-id');
           
           return !result.success && 
                  result.error !== undefined && 

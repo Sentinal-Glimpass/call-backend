@@ -8,6 +8,50 @@ const { ObjectId } = require('mongodb');
 const { warmupBotWithRetry } = require('../../utils/botWarmup.js');
 
 /**
+ * Transform WebSocket URL to use session_uuid instead of agent_id
+ * @param {string} originalUrl - Original WebSocket URL with agent_id
+ * @param {string} sessionUuid - Session UUID to replace agent_id with
+ * @returns {string} - Transformed WebSocket URL
+ */
+function transformWebSocketUrl(originalUrl, sessionUuid) {
+  try {
+    // Handle different URL patterns:
+    // Pattern 1: ws://server/chat/v2/{agent_id} -> ws://server/chat/v2/{session_uuid}
+    // Pattern 2: ws://server/chat/v1/{agent_id}?session_id=xxx -> ws://server/chat/v1/{session_uuid}?session_id=xxx  
+    // Pattern 3: ws://server/chat/v1/{agent_id}/session_id=xxx -> ws://server/chat/v1/{session_uuid}/session_id=xxx
+    
+    // Check if URL contains query parameters
+    const [baseUrl, queryString] = originalUrl.split('?');
+    const urlParts = baseUrl.split('/');
+    
+    // Look for chat/v1 or chat/v2 pattern
+    const chatIndex = urlParts.findIndex(part => part.startsWith('chat'));
+    if (chatIndex !== -1 && chatIndex + 2 < urlParts.length) {
+      // Replace the part after chat/v[X] (which should be agent_id) with session_uuid
+      urlParts[chatIndex + 2] = sessionUuid;
+      const transformedBase = urlParts.join('/');
+      return queryString ? `${transformedBase}?${queryString}` : transformedBase;
+    }
+    
+    // Fallback: replace the last path segment if no specific pattern matched
+    if (urlParts.length >= 2) {
+      const lastPart = urlParts[urlParts.length - 1];
+      // Don't replace if it looks like a parameter (contains =)
+      if (!lastPart.includes('=')) {
+        urlParts[urlParts.length - 1] = sessionUuid;
+        const transformedBase = urlParts.join('/');
+        return queryString ? `${transformedBase}?${queryString}` : transformedBase;
+      }
+    }
+    
+    return originalUrl; // Return original if pattern doesn't match
+  } catch (error) {
+    console.warn(`⚠️ Failed to transform WebSocket URL: ${error.message}`);
+    return originalUrl; // Return original on error
+  }
+}
+
+/**
  * Check client-specific concurrency limits
  * @param {string} clientId - Client ObjectId
  * @returns {Promise<{allowed: boolean, currentCount: number, maxAllowed: number}>}
@@ -167,6 +211,8 @@ async function trackCallStart(callData) {
       failureReason: callData.failureReason || null,
       warmupAttempts: callData.warmupAttempts || null,
       warmupDuration: callData.warmupDuration || null,
+      sessionUuid: callData.sessionUuid || null,
+      agentId: callData.agentId || null,
       // Enhanced tracking for pause/resume
       contactIndex: callData.contactIndex || null,        // Position in campaign list
       sequenceNumber: callData.sequenceNumber || null,    // Unique sequence in campaign
@@ -410,6 +456,23 @@ async function processSingleCall(callParams) {
   const { clientId, campaignId, from, to, wssUrl, firstName, tag, listId } = callParams;
   const startTime = Date.now();
   
+  // Extract agent_id from wssUrl for warmup
+  let agentId = '';
+  try {
+    const urlParts = wssUrl.split('/');
+    agentId = urlParts[urlParts.length - 1]; // Last part should be agent_id
+    console.log(`🎯 Extracted agent_id: ${agentId} from wssUrl: ${wssUrl}`);
+  } catch (error) {
+    console.warn(`⚠️ Could not extract agent_id from wssUrl: ${wssUrl}`);
+    agentId = tag ?? ''; // Fallback to tag
+  }
+  
+  console.log(`🚀 Starting single call process:`);
+  console.log(`   From: ${from}`);
+  console.log(`   To: ${to}`);
+  console.log(`   Agent ID: ${agentId}`);
+  console.log(`   Original WSS URL: ${wssUrl}`);
+  
   try {
     console.log(`🚀 Processing call: ${from} -> ${to} (Client: ${clientId})`);
     
@@ -431,13 +494,12 @@ async function processSingleCall(callParams) {
     console.log(`✅ Slot available after ${slotResult.waitTime}ms wait`);
     
     // Step 2: Bot warmup with retry logic
-    let warmupResult = { success: true, attempts: 0, duration: 0 };
-    const warmupUrl = process.env.BOT_WARMUP_URL;
+    let warmupResult = { success: true, attempts: 0, duration: 0, sessionUuid: null };
     const warmupEnabled = process.env.BOT_WARMUP_ENABLED !== 'false';
     
-    if (warmupEnabled && warmupUrl) {
-      console.log('🤖 Starting bot warmup...');
-      warmupResult = await warmupBotWithRetry(warmupUrl);
+    if (warmupEnabled) {
+      console.log(`🤖 Starting bot warmup for agent: ${agentId}...`);
+      warmupResult = await warmupBotWithRetry(wssUrl, agentId);
       
       if (!warmupResult.success) {
         // Track failed call for reporting
@@ -448,7 +510,9 @@ async function processSingleCall(callParams) {
           to,
           failureReason: 'bot_not_ready',
           warmupAttempts: warmupResult.attempts,
-          warmupDuration: warmupResult.duration
+          warmupDuration: warmupResult.duration,
+          sessionUuid: warmupResult.sessionUuid,
+          agentId: agentId
         };
         
         const trackResult = await trackCallStart(failedCallData);
@@ -463,16 +527,33 @@ async function processSingleCall(callParams) {
         };
       }
       
-      console.log(`✅ Bot warmup successful (${warmupResult.duration}ms, ${warmupResult.attempts} attempts)`);
+      console.log(`✅ Bot warmup successful (${warmupResult.duration}ms, ${warmupResult.attempts} attempts, session: ${warmupResult.sessionUuid})`);
+      
+      // Transform WebSocket URL to use session_uuid instead of agent_id
+      if (warmupResult.sessionUuid) {
+        const originalWssUrl = wssUrl;
+        const transformedWssUrl = transformWebSocketUrl(wssUrl, warmupResult.sessionUuid);
+        console.log(`🔄 WebSocket URL transformation:`);
+        console.log(`   Original WSS URL:    ${originalWssUrl}`);
+        console.log(`   Session UUID:        ${warmupResult.sessionUuid}`);
+        console.log(`   Transformed WSS URL: ${transformedWssUrl}`);
+        // Update wssUrl for the Plivo call
+        callParams.wssUrl = transformedWssUrl;
+        console.log(`✅ WebSocket URL updated for Plivo call`);
+      }
     }
     
     // Step 3: Make Plivo API call first to get CallUUID
+    console.log(`📡 Initiating Plivo call with transformed WSS URL...`);
+    console.log(`   Final WSS URL for call: ${callParams.wssUrl || wssUrl}`);
+    
     let plivoResult;
     try {
       plivoResult = await makePlivoCall({
+        clientId,
         from,
         to,
-        wssUrl,
+        wssUrl: callParams.wssUrl || wssUrl, // Use transformed URL if available
         firstName,
         tag,
         listId,
@@ -487,7 +568,9 @@ async function processSingleCall(callParams) {
         };
       }
       
-      console.log(`📞 Plivo call initiated: ${plivoResult.callUUID}`);
+      console.log(`📞 Plivo call initiated successfully!`);
+      console.log(`   Call UUID: ${plivoResult.callUUID}`);
+      console.log(`   WSS URL used: ${callParams.wssUrl || wssUrl}`);
       
     } catch (plivoError) {
       console.error('❌ Plivo API call failed:', plivoError);
@@ -507,6 +590,8 @@ async function processSingleCall(callParams) {
       to,
       warmupAttempts: warmupResult.attempts,
       warmupDuration: warmupResult.duration,
+      sessionUuid: warmupResult.sessionUuid,
+      agentId: agentId,
       // Enhanced tracking for pause/resume
       contactIndex: callParams.contactIndex,
       sequenceNumber: callParams.sequenceNumber,
@@ -524,11 +609,20 @@ async function processSingleCall(callParams) {
     
     const totalDuration = Date.now() - startTime;
     console.log(`✅ Call processing complete: ${plivoResult.callUUID} (${totalDuration}ms)`);
+    console.log(`📈 Final call summary:`);
+    console.log(`   Session UUID: ${warmupResult.sessionUuid}`);
+    console.log(`   Agent ID: ${agentId}`);
+    console.log(`   Call UUID: ${plivoResult.callUUID}`);
+    console.log(`   Final WSS URL: ${callParams.wssUrl || wssUrl}`);
+    console.log(`   Total Processing Time: ${totalDuration}ms`);
+    console.log(`   Warmup Time: ${warmupResult.duration}ms`);
     
     return {
         success: true,
         callId: trackResult?.callId || null,
         callUUID: plivoResult.callUUID,
+        sessionUuid: warmupResult.sessionUuid,
+        agentId: agentId,
         processingTime: totalDuration,
         warmupTime: warmupResult.duration,
         waitTime: slotResult.waitTime

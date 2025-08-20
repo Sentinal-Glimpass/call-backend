@@ -35,6 +35,7 @@ const upload = multer({
   }
 });
 const activeCalls = require('../apps/helper/activeCalls')
+const { processSingleCall } = activeCalls;
 const apiKeyValidator = require('../middleware/apiKeyValidator')
 const { 
   authenticateToken, 
@@ -507,14 +508,46 @@ router.post('/single-call', authenticateToken, validateResourceOwnership, valida
         
         // For single calls (test calls), we mark them as 'testcall' instead of using camp_id
         // Test calls are for testing purposes only and don't have campaign IDs
-        const listDataStringify = JSON.stringify({ assistantId, customPrompt });
         const uploadedName = customPrompt || '';
         const tag = assistantId; // Use assistantId as tag - will lookup client from assistant
         const listId = 'testcall';  // Mark as test call
-        const camp_id = 'testcall';  // Use testcall designation for test calls
+        const campaignId = null;  // No campaign for single calls
         
-        const result = await initiatePlivoCall(from, to, wssUrl, clientId, listDataStringify, uploadedName, tag, listId, camp_id);
-        res.status(result.status).send( result.data ); 
+        console.log(`🚀 Processing single call with new warmup system...`);
+        
+        // Use the new processSingleCall function with warmup logic
+        const result = await processSingleCall({
+            clientId,
+            campaignId,
+            from,
+            to,
+            wssUrl,
+            firstName: uploadedName,
+            tag,
+            listId
+        });
+        
+        if (result.success) {
+            res.status(201).json({
+                success: true,
+                message: 'Call initiated successfully with warmup',
+                callUUID: result.callUUID,
+                sessionUuid: result.sessionUuid,
+                agentId: result.agentId,
+                callId: result.callId,
+                processingTime: result.processingTime,
+                warmupTime: result.warmupTime
+            });
+        } else {
+            console.error(`❌ Single call failed: ${result.error}`);
+            res.status(400).json({
+                success: false,
+                message: result.error,
+                stage: result.stage,
+                sessionUuid: result.sessionUuid,
+                agentId: result.agentId
+            });
+        } 
     } catch(error){
         res.status(500).send({ message: "Internal Server Error", error });
     }
@@ -1227,10 +1260,13 @@ router.post('/callback-url', async(req, res) => {
 router.post('/callback-record-url', async(req, res) => {
   try{
     const recordData = req.body
-    saveRecordData(recordData)
+    console.log('📹 Recording data received:', recordData.CallUUID);
+    await saveRecordData(recordData)
+    res.status(200).json({ message: "Recording data saved successfully" });
   } catch(error)
   {
-    console.log('error recording data')
+    console.log('❌ Error recording data:', error);
+    res.status(500).json({ error: "Failed to save recording data" });
   }
 })
 
