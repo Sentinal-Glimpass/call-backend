@@ -357,10 +357,9 @@ router.post('/clear-audio-cache', authenticateToken, validateResourceOwnership, 
 
     console.log('Clearing audio cache for agent:', agentId);
     
-    // Connect to Redis using environment configuration
-    const redisUrl = process.env.REDIS_URL || 'redis://redis:6379';
+    // Connect to Redis using working configuration
     const redisClient = createClient({
-      url: redisUrl
+      url: 'redis://:12121@10.128.0.10:6379'
     });
     
     await redisClient.connect();
