@@ -159,7 +159,7 @@ async function trackCallStart(callData) {
       campaignId: callData.campaignId ? new ObjectId(callData.campaignId) : null,
       from: callData.from,
       to: callData.to,
-      status: 'processed',  // Using our 5-state system: processed -> ringing -> ongoing -> call-ended -> completed
+      status: callData.failureReason ? 'failed' : 'processed',  // Set 'failed' for API failures, 'processed' for successful calls
       statusTimestamp: new Date(), // Track when status was set for lazy cleanup
       startTime: new Date(),
       endTime: null,
@@ -494,11 +494,36 @@ async function processSingleCall(callParams) {
       });
       
       if (!callResult.success) {
+        // Track failed API call in database so it's counted in campaign completion
+        const failedCallData = {
+          callUUID: null, // No CallUUID since API call failed
+          provider: callResult.provider || 'unknown',
+          clientId,
+          campaignId,
+          from,
+          to,
+          warmupAttempts: warmupResult.attempts,
+          warmupDuration: warmupResult.duration,
+          failureReason: 'api_call_failed',
+          apiError: callResult.error,
+          sequenceNumber: callParams.sequenceNumber,
+          firstName: callParams.firstName,
+          listId: callParams.listId
+        };
+        
+        const trackResult = await trackCallStart(failedCallData);
+        if (trackResult.success) {
+          console.log(`❌ Failed API call tracked: ${to} - ${callResult.error}`);
+        } else {
+          console.error(`❌ Failed to track failed call: ${to} - ${trackResult.error}`);
+        }
+        
         return {
           success: false,
           error: callResult.error,
           stage: 'provider_api',
-          provider: callResult.provider
+          provider: callResult.provider,
+          callId: trackResult?.callId || null
         };
       }
       
@@ -506,10 +531,36 @@ async function processSingleCall(callParams) {
       
     } catch (providerError) {
       console.error('❌ Provider API call failed:', providerError);
+      
+      // Track exception-based API failures in database
+      const failedCallData = {
+        callUUID: null, // No CallUUID since API call failed
+        provider: 'unknown',
+        clientId,
+        campaignId,
+        from,
+        to,
+        warmupAttempts: warmupResult.attempts,
+        warmupDuration: warmupResult.duration,
+        failureReason: 'api_exception',
+        apiError: providerError.message,
+        sequenceNumber: callParams.sequenceNumber,
+        firstName: callParams.firstName,
+        listId: callParams.listId
+      };
+      
+      const trackResult = await trackCallStart(failedCallData);
+      if (trackResult.success) {
+        console.log(`❌ Failed API exception tracked: ${to} - ${providerError.message}`);
+      } else {
+        console.error(`❌ Failed to track failed exception: ${to} - ${trackResult.error}`);
+      }
+      
       return {
         success: false,
         error: `Provider API error: ${providerError.message}`,
-        stage: 'provider_api'
+        stage: 'provider_api',
+        callId: trackResult?.callId || null
       };
     }
     

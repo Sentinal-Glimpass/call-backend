@@ -2077,6 +2077,21 @@ async function getCampaignProgress(campaignId) {
       if (finishedCalls >= totalContacts && totalContacts > 0) {
         campaignStatus = 'completed';  // All contacts processed
         console.log(`🔍 DEBUG: Status -> 'completed' (${finishedCalls}/${totalContacts} contacts finished)`);
+        
+        // Update database with completed status if it's different from current status
+        if (campaign.status !== 'completed') {
+          console.log(`📊 Updating campaign ${campaignId} status from '${campaign.status}' to 'completed'`);
+          await campaignCollection.updateOne(
+            { _id: new ObjectId(campaignId) },
+            { 
+              $set: { 
+                status: 'completed',
+                completedAt: new Date(),
+                lastActivity: new Date()
+              }
+            }
+          );
+        }
       } else {
         campaignStatus = 'running';  // Still processing contacts
         console.log(`🔍 DEBUG: Status -> 'running' (${finishedCalls}/${totalContacts} contacts finished, still processing)`);
