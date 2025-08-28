@@ -508,7 +508,8 @@ async function processSingleCall(callParams) {
         firstName,
         tag,
         listId,
-        campaignId
+        campaignId,
+        provider: callParams.provider // Pass provider parameter for explicit routing
       });
       
       if (!callResult.success) {

@@ -542,33 +542,39 @@ router.post('/single-call', authenticateToken, validateResourceOwnership, valida
             console.warn(`⚠️ Could not determine provider info: ${providerError.message}`);
         }
         
-        // Use the unified CallProviderService instead of hardcoded Plivo
-        const CallProviderService = require('../services/callProviderService');
-        const { trackCallStart } = require('../apps/helper/activeCalls.js');
-        
+        // Use processSingleCall to get proper tracking, concurrency, and billing (like campaigns do)
+        const { processSingleCall } = require('../apps/helper/activeCalls.js');
+         
         const callParams = {
+            clientId,
+            campaignId: 'testcall',
             from,
             to,
             wssUrl,
-            clientId,
-            campaignId: 'testcall',
             firstName: customPrompt || '',
             tag: assistantId,
             listId: 'testcall',
-            provider: provider // Pass the provider parameter to CallProviderService
+            provider: provider, // Pass the provider parameter 
+            // Additional params for proper tracking
+            contactIndex: 0,
+            sequenceNumber: 1,
+            contactData: { first_name: customPrompt || '', number: to }
         };
         
-        console.log('🚀 Initiating call via unified CallProviderService...');
-        const result = await CallProviderService.makeCall(callParams);
-        
-        // Call tracking is now handled atomically within CallProviderService to prevent race conditions
+        console.log('🚀 Initiating single call via processSingleCall (with tracking)...');
+        const result = await processSingleCall(callParams);
         
         if (result.success) {
-            console.log(`✅ Call initiated successfully via ${result.provider.toUpperCase()}: ${result.callUUID}`);
-            // Return the EXACT same format as original initiatePlivoCall
-            res.status(200).send(result.providerResponse);
+            console.log(`✅ Single call initiated successfully via ${result.provider.toUpperCase()}: ${result.callUUID}`);
+            
+            // Return the EXACT same format as original initiatePlivoCall for frontend compatibility
+            res.status(200).send({
+                api_id: result.callUUID, // Map callUUID to api_id for compatibility
+                message: 'Call initiated successfully.',
+                request_uuid: result.callUUID
+            });
         } else {
-            console.error(`❌ Call failed: ${result.error}`);
+            console.error(`❌ Single call failed: ${result.error}`);
             // Return error in same format as original
             res.status(500).send({ message: result.error });
         } 
