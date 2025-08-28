@@ -162,7 +162,7 @@ router.post('/xml-plivo', (req, res) => {
 	keepCallAlive="true" 
 	bidirectional="true" 
         audioTrack="inbound"
-        extraHeaders="from=${sanitizedFrom},to=${sanitizedTo},callUUID=${CallUUID},listId=${listId},clientId=${clientId},campId=${campId},firstName=${firstName}"
+        extraHeaders="from=${sanitizedFrom},to=${sanitizedTo},callUUID=${CallUUID},listId=${listId},clientId=${clientId},campId=${campId},firstName=${firstName},provider=plivo"
 	contentType="audio/x-mulaw;rate=8000"
         statusCallbackUrl="${baseUrl}/plivo/callback-url" 
         statusCallbackMethod="POST">${wss}</Stream>

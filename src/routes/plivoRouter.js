@@ -479,7 +479,7 @@ router.post('/get-list-contact', authenticateToken, validateResourceOwnership, a
 })
 router.post('/single-call', authenticateToken, validateResourceOwnership, validationSchemas.singleCallValidation, auditLog, async(req, res) =>{
     try{
-        const { from, to, wssUrl, clientId, assistantId, customPrompt } = req.body;
+        const { from, to, wssUrl, clientId, assistantId, customPrompt, provider } = req.body;
         
         // Validate client balance before making test call - simple <= 0 check
         const balanceCheck = await getCurrentClientBalance(clientId);
@@ -505,16 +505,73 @@ router.post('/single-call', authenticateToken, validateResourceOwnership, valida
         
         console.log(`✅ Balance validation passed for test call: ${balanceCheck.balance} credits available`);
         
-        // For single calls (test calls), we mark them as 'testcall' instead of using camp_id
-        // Test calls are for testing purposes only and don't have campaign IDs
-        const listDataStringify = JSON.stringify({ assistantId, customPrompt });
-        const uploadedName = customPrompt || '';
-        const tag = assistantId; // Use assistantId as tag - will lookup client from assistant
-        const listId = 'testcall';  // Mark as test call
-        const camp_id = 'testcall';  // Use testcall designation for test calls
+        // Get provider and credentials info for logging
+        const PhoneProviderService = require('../services/phoneProviderService');
+        const TelephonyCredentialsService = require('../services/telephonyCredentialsService');
         
-        const result = await initiatePlivoCall(from, to, wssUrl, clientId, listDataStringify, uploadedName, tag, listId, camp_id);
-        res.status(result.status).send( result.data ); 
+        try {
+            // Determine provider - either explicitly provided or from phone number mapping
+            let providerInfo;
+            if (provider) {
+                console.log(`🎯 Using explicitly specified provider: ${provider}`);
+                providerInfo = { provider: provider.toLowerCase(), phoneNumber: from, isExplicit: true };
+            } else {
+                console.log(`🔍 Determining provider based on phone number mapping...`);
+                providerInfo = await PhoneProviderService.getProvider(from);
+            }
+            
+            let credentialsInfo;
+            
+            if (clientId) {
+                credentialsInfo = await TelephonyCredentialsService.getCredentials(clientId, providerInfo.provider);
+            } else {
+                credentialsInfo = TelephonyCredentialsService.getSystemDefaultCredentials(providerInfo.provider, 'unknown');
+            }
+            
+            // Comprehensive logging for single call
+            console.log(`📞 SINGLE CALL ROUTING DETAILS:`);
+            console.log(`   📱 From: ${from} → To: ${to}`);
+            console.log(`   👤 Client ID: ${clientId}`);
+            console.log(`   🏢 Provider: ${providerInfo.provider.toUpperCase()} ${provider ? '(EXPLICIT)' : '(PHONE MAPPING)'}`);
+            console.log(`   🔑 Credentials: ${credentialsInfo.isClientSpecific ? 'CLIENT-SPECIFIC' : 'SYSTEM DEFAULT'}`);
+            console.log(`   🆔 Account SID: ${TelephonyCredentialsService.maskCredential(credentialsInfo.accountSid)}`);
+            console.log(`   📋 Call Type: SINGLE TEST CALL`);
+            console.log(`   🎯 Assistant ID: ${assistantId || 'N/A'}`);
+            
+        } catch (providerError) {
+            console.warn(`⚠️ Could not determine provider info: ${providerError.message}`);
+        }
+        
+        // Use the unified CallProviderService instead of hardcoded Plivo
+        const CallProviderService = require('../services/callProviderService');
+        const { trackCallStart } = require('../apps/helper/activeCalls.js');
+        
+        const callParams = {
+            from,
+            to,
+            wssUrl,
+            clientId,
+            campaignId: 'testcall',
+            firstName: customPrompt || '',
+            tag: assistantId,
+            listId: 'testcall',
+            provider: provider // Pass the provider parameter to CallProviderService
+        };
+        
+        console.log('🚀 Initiating call via unified CallProviderService...');
+        const result = await CallProviderService.makeCall(callParams);
+        
+        // Call tracking is now handled atomically within CallProviderService to prevent race conditions
+        
+        if (result.success) {
+            console.log(`✅ Call initiated successfully via ${result.provider.toUpperCase()}: ${result.callUUID}`);
+            // Return the EXACT same format as original initiatePlivoCall
+            res.status(200).send(result.providerResponse);
+        } else {
+            console.error(`❌ Call failed: ${result.error}`);
+            // Return error in same format as original
+            res.status(500).send({ message: result.error });
+        } 
     } catch(error){
         res.status(500).send({ message: "Internal Server Error", error });
     }
@@ -527,6 +584,7 @@ router.post('/create-campaign', authenticateToken, validateResourceOwnership, va
     const wssUrl = req.body.wssUrl
     const campaignName = req.body.campaignName
     const clientId = req.body.clientId
+    const provider = req.body.provider
 
     if (!listId || !fromNumber || !wssUrl || !campaignName || !clientId) {
       return res.status(400).json({ 
@@ -534,14 +592,61 @@ router.post('/create-campaign', authenticateToken, validateResourceOwnership, va
           message: "Please provide all required values: listId, fromNumber, wssUrl, campaignName, clientId." 
       });
     }
-    // const listId = "67dba49c54866db7bc1f3703"
-    // const fromNumber = "+918035735659"
-    // const wssUrl = "wss://socket.glimpass.com/chat/v2/67d06f02ff6ddffade9f99dd"
-    // const campaignName = "de-ri-p113445341"
-    // const clientId = "664a130cb70125f7e8c84d4a"
-    const result = await makeCallViaCampaign(listId, fromNumber, wssUrl, campaignName, clientId)
+    
+    // Get provider and credentials info for logging
+    const PhoneProviderService = require('../services/phoneProviderService');
+    const TelephonyCredentialsService = require('../services/telephonyCredentialsService');
+    
+    try {
+        // Determine provider - either explicitly provided or from phone number mapping
+        let providerInfo;
+        if (provider) {
+            console.log(`🎯 Using explicitly specified provider: ${provider}`);
+            providerInfo = { provider: provider.toLowerCase(), phoneNumber: fromNumber, isExplicit: true };
+        } else {
+            console.log(`🔍 Determining provider based on phone number mapping...`);
+            providerInfo = await PhoneProviderService.getProvider(fromNumber);
+        }
+        
+        let credentialsInfo;
+        
+        if (clientId) {
+            credentialsInfo = await TelephonyCredentialsService.getCredentials(clientId, providerInfo.provider);
+        } else {
+            credentialsInfo = TelephonyCredentialsService.getSystemDefaultCredentials(providerInfo.provider, 'unknown');
+        }
+        
+        // Comprehensive logging for campaign creation
+        console.log(`🚀 CAMPAIGN CREATION ROUTING DETAILS:`);
+        console.log(`   📊 Campaign Name: ${campaignName}`);
+        console.log(`   📱 From Number: ${fromNumber}`);
+        console.log(`   👤 Client ID: ${clientId}`);
+        console.log(`   📋 List ID: ${listId}`);
+        console.log(`   🏢 Provider: ${providerInfo.provider.toUpperCase()} ${provider ? '(EXPLICIT)' : '(PHONE MAPPING)'}`);
+        console.log(`   🔑 Credentials: ${credentialsInfo.isClientSpecific ? 'CLIENT-SPECIFIC' : 'SYSTEM DEFAULT'}`);
+        console.log(`   🆔 Account SID: ${TelephonyCredentialsService.maskCredential(credentialsInfo.accountSid)}`);
+        console.log(`   📋 Call Type: BULK CAMPAIGN`);
+        console.log(`   🌐 WebSocket URL: ${wssUrl}`);
+        
+    } catch (providerError) {
+        console.warn(`⚠️ Could not determine provider info for campaign: ${providerError.message}`);
+    }
+    
+    console.log('🚀 Starting campaign via enhanced system...');
+    const result = await makeCallViaCampaign(listId, fromNumber, wssUrl, campaignName, clientId, provider)
     let status = result.status || 200
     let message = result.message || "call scheduled"
+    
+    if (result.status === 200) {
+        console.log(`✅ Campaign created successfully: ${campaignName} (ID: ${result.campaignId || 'N/A'})`);
+        console.log(`   📊 Campaign will use provider: ${providerInfo?.provider?.toUpperCase() || 'Auto-detected'}`);
+        console.log(`   🔑 Credentials: ${credentialsInfo?.isClientSpecific ? 'CLIENT-SPECIFIC' : 'SYSTEM DEFAULT'}`);
+        console.log(`   📱 From Number: ${fromNumber}`);
+        console.log(`   📋 List ID: ${listId}`);
+    } else {
+        console.error(`❌ Campaign creation failed: ${message}`);
+    }
+    
     res.status(status).send({message: message})
   } catch(error){
     res.status(500).send({ message: "Internal Server Error", error });
@@ -1227,10 +1332,12 @@ router.post('/callback-url', async(req, res) => {
 router.post('/callback-record-url', async(req, res) => {
   try{
     const recordData = req.body
-    saveRecordData(recordData)
+    const result = await saveRecordData(recordData)
+    res.status(200).json({ message: "Recording data saved successfully" });
   } catch(error)
   {
-    console.log('error recording data')
+    console.log('error recording data:', error)
+    res.status(500).json({ message: "Error saving recording data" });
   }
 })
 

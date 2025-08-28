@@ -4,40 +4,74 @@
  */
 
 const PhoneProviderService = require('./phoneProviderService');
+const TelephonyCredentialsService = require('./telephonyCredentialsService');
 const PlivoAdapter = require('../adapters/plivoAdapter');
 const TwilioAdapter = require('../adapters/twilioAdapter');
 
 class CallProviderService {
   /**
-   * Make a call using the appropriate provider based on phone number mapping
-   * @param {Object} callParams - Call parameters
+   * Make a call using the appropriate provider based on explicit provider or phone number mapping
+   * @param {Object} callParams - Call parameters (now supports optional 'provider' field)
    * @returns {Promise<Object>} Call result with provider info
    */
   static async makeCall(callParams) {
     try {
-      const { from, to, wssUrl, clientId, campaignId, firstName, tag, listId } = callParams;
+      const { from, to, wssUrl, clientId, campaignId, firstName, tag, listId, provider } = callParams;
       
-      console.log(`📞 Unified call routing: ${from} → ${to}`);
+      console.log(`📞 Unified call routing: ${from} → ${to} (Client: ${clientId})`);
+      console.log(`🔍 CALLPROVIDERSERVICE DEBUG - Provider parameter received:`, provider);
       
-      // Get provider for the 'from' number
-      const providerInfo = await PhoneProviderService.getProvider(from);
+      let providerInfo;
+      
+      // If provider is explicitly specified, use it directly
+      if (provider) {
+        console.log(`🎯 Using explicitly specified provider: ${provider}`);
+        providerInfo = {
+          provider: provider.toLowerCase(),
+          phoneNumber: from,
+          isExplicit: true
+        };
+      } else {
+        console.log(`🔍 Determining provider based on phone number mapping...`);
+        // Fallback to phone number mapping
+        providerInfo = await PhoneProviderService.getProvider(from);
+      }
       
       console.log(`🎯 Provider selected: ${providerInfo.provider} (isDefault: ${providerInfo.isDefault || false})`);
+      
+      // Get client-specific credentials or fallback to system defaults
+      let finalCredentials;
+      if (clientId) {
+        console.log(`🔐 Looking up client-specific credentials for client ${clientId}...`);
+        finalCredentials = await TelephonyCredentialsService.getCredentials(clientId, providerInfo.provider);
+        
+        // Update last used timestamp
+        if (finalCredentials.isClientSpecific) {
+          await TelephonyCredentialsService.updateLastUsed(clientId, providerInfo.provider);
+        }
+      } else {
+        console.log(`⚠️  No clientId provided, using system default credentials`);
+        finalCredentials = TelephonyCredentialsService.getSystemDefaultCredentials(providerInfo.provider, 'unknown');
+      }
+      
+      console.log(`🔑 Using ${finalCredentials.isClientSpecific ? 'client-specific' : 'system default'} credentials`);
       
       let callResult;
       
       switch (providerInfo.provider) {
         case 'twilio':
           console.log('🔵 Routing to Twilio...');
-          callResult = await TwilioAdapter.makeCall(callParams, providerInfo.providerConfig);
+          callResult = await TwilioAdapter.makeCall(callParams, finalCredentials);
           break;
           
         case 'plivo':
         default:
           console.log('🟢 Routing to Plivo...');
-          callResult = await PlivoAdapter.makeCall(callParams, providerInfo.providerConfig);
+          callResult = await PlivoAdapter.makeCall(callParams, finalCredentials);
           break;
       }
+      
+      // Call tracking is now handled within each adapter to prevent race conditions
       
       // Add provider metadata to result
       return {
@@ -45,8 +79,10 @@ class CallProviderService {
         provider: providerInfo.provider,
         providerConfig: {
           // Don't expose sensitive config in response
-          accountSid: providerInfo.providerConfig?.accountSid || 'hidden',
-          isDefault: providerInfo.isDefault || false
+          accountSid: finalCredentials?.accountSid ? 
+            TelephonyCredentialsService.maskCredential(finalCredentials.accountSid) : 'hidden',
+          isDefault: providerInfo.isDefault || false,
+          isClientSpecific: finalCredentials?.isClientSpecific || false
         }
       };
       

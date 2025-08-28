@@ -17,8 +17,8 @@ class PlivoAdapter {
       const { from, to, wssUrl, firstName, tag, listId, campaignId, clientId } = callParams;
       
       // Use provided config or fall back to environment/defaults
-      const accountSid = providerConfig?.accountSid || process.env.PLIVO_ACCOUNT_SID || 'MAMTBIYJUYNMRINGQ4ND';
-      const authToken = providerConfig?.authToken || process.env.PLIVO_AUTH_TOKEN || 'default_token';
+      const accountSid = providerConfig?.accountSid || process.env.PLIVO_ACCOUNT_SID || 'default_account_sid';
+      const authToken = providerConfig?.authToken || process.env.PLIVO_AUTH_TOKEN || 'default_auth_token';
       
       const plivoApiUrl = `https://api.plivo.com/v1/Account/${accountSid}/Call/`;
       const baseUrl = process.env.BASE_URL || 'https://application.glimpass.com';
@@ -36,7 +36,7 @@ class PlivoAdapter {
         answer_method: 'POST',
       };
       
-      // Create authorization header
+      // Create auth header from credentials
       const authHeader = this.createAuthHeader(accountSid, authToken);
       
       console.log(`🟢 Plivo API Call:`);

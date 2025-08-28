@@ -82,7 +82,7 @@ async function validatePhoneNumber(phoneNumber) {
 function getProviderConfig(provider) {
   const configs = {
     plivo: {
-      accountSid: process.env.PLIVO_ACCOUNT_SID || 'MAMTBIYJUYNMRINGQ4ND',
+      accountSid: process.env.PLIVO_ACCOUNT_SID || 'default_plivo_sid',
       authToken: process.env.PLIVO_AUTH_TOKEN || 'default_plivo_token'
     },
     twilio: {

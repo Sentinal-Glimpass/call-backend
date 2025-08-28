@@ -34,6 +34,8 @@ const markaiblePaymentRouter = require('./src/routes/markaiblePaymentRouter');
 const billingRouter = require('./src/routes/billingRouter');
 const phoneProviderRouter = require('./src/routes/phoneProviderRouter');
 const twilioRouter = require('./src/routes/twilioRouter');
+const telephonyCredentialsRouter = require('./src/routes/telephonyCredentialsRouter');
+const providerConfigRouter = require('./src/routes/providerConfigRouter');
 const apiKeyValidator = require('./src/middleware/apiKeyValidator')
 const { apiLogger, requestCounter } = require('./src/middleware/apiLogger')
 // const { apiLimiter } = require('./src/middleware/authMiddleware')
@@ -224,6 +226,8 @@ app.use('/api/payment', markaiblePaymentRouter);
 app.use('/billing', billingRouter);
 app.use('/phone-provider', phoneProviderRouter);
 app.use('/twilio', twilioRouter);
+app.use('/telephony-credentials', telephonyCredentialsRouter);
+app.use('/provider-config', providerConfigRouter);
 
 // LEGACY ROUTES - DEPRECATED (DO NOT USE)
 // app.use('/graph', creatorRouter);

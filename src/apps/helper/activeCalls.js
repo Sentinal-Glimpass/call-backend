@@ -153,10 +153,28 @@ async function trackCallStart(callData) {
     const database = client.db("talkGlimpass");
     const activeCallsCollection = database.collection("activeCalls");
     
+    // Helper function to safely convert to ObjectId
+    const toObjectIdSafe = (value) => {
+      if (!value) return null;
+      try {
+        // Check if it's already an ObjectId
+        if (value instanceof ObjectId) return value;
+        // Check if it's a valid 24-character hex string
+        if (typeof value === 'string' && value.match(/^[0-9a-fA-F]{24}$/)) {
+          return new ObjectId(value);
+        }
+        // For non-ObjectId strings like 'testcall', 'incoming', return as string
+        return value;
+      } catch (error) {
+        // If conversion fails, return the original value
+        return value;
+      }
+    };
+
     const callRecord = {
       callUUID: callData.callUUID || null, // Will be updated when Plivo responds
       clientId: new ObjectId(callData.clientId),
-      campaignId: callData.campaignId ? new ObjectId(callData.campaignId) : null,
+      campaignId: toObjectIdSafe(callData.campaignId),
       from: callData.from,
       to: callData.to,
       status: callData.failureReason ? 'failed' : 'processed',  // Set 'failed' for API failures, 'processed' for successful calls
@@ -626,7 +644,8 @@ async function makePlivoCall(params) {
     
     // Prepare the Plivo API call
     const axios = require('axios');
-    const plivoApiUrl = 'https://api.plivo.com/v1/Account/MAMTBIYJUYNMRINGQ4ND/Call/';
+    const accountSid = process.env.PLIVO_ACCOUNT_SID;
+    const plivoApiUrl = `https://api.plivo.com/v1/Account/${accountSid}/Call/`;
     
     // Get base URL from environment variable, fallback to default if not set
     const baseUrl = process.env.BASE_URL || 'https://application.glimpass.com';
@@ -646,7 +665,7 @@ async function makePlivoCall(params) {
     const response = await axios.post(plivoApiUrl, payload, {
       headers: {
         'Content-Type': 'application/json',
-        'Authorization': 'Basic TUFNVEJJWUpVWU5NUklOR1E0TkQ6WlRWa1pUVm1ZMlkzWW1SaU9URTNNelEzTWpVME1tSTVObVJrTTJJNA==',
+        'Authorization': `Basic ${Buffer.from(`${process.env.PLIVO_ACCOUNT_SID}:${process.env.PLIVO_AUTH_TOKEN}`).toString('base64')}`,
       },
     });
     

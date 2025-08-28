@@ -511,7 +511,7 @@ router.post('/test-setup', async (req, res) => {
         phoneNumber: '+918035735659',
         provider: 'plivo',
         providerConfig: {
-          accountSid: 'MAMTBIYJUYNMRINGQ4ND',
+          accountSid: process.env.PLIVO_ACCOUNT_SID || 'default_plivo_sid',
           authToken: process.env.PLIVO_AUTH_TOKEN || 'test_token'
         }
       },

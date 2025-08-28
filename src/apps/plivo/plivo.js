@@ -169,7 +169,8 @@ async function insertListContent(rows) {
   }
 
   async function initiatePlivoCall(from, to, wssUrl, clientId, listDataStringify, uploadedName= '', tag = '', listId = 'incoming', camp_id = 'incoming') {
-    const plivoApiUrl = 'https://api.plivo.com/v1/Account/MAMTBIYJUYNMRINGQ4ND/Call/';
+    const accountSid = process.env.PLIVO_ACCOUNT_SID;
+    const plivoApiUrl = `https://api.plivo.com/v1/Account/${accountSid}/Call/`;
     
     // Get base URL from environment variable, fallback to default if not set
     const baseUrl = process.env.BASE_URL || 'https://application.glimpass.com';
@@ -192,7 +193,7 @@ async function insertListContent(rows) {
       const response = await axios.post(plivoApiUrl, payload, {
         headers: {
             'Content-Type': 'application/json',
-            'Authorization': 'Basic TUFNVEJJWUpVWU5NUklOR1E0TkQ6WlRWa1pUVm1ZMlkzWW1SaU9URTNNelEzTWpVME1tSTVObVJrTTJJNA==',
+            'Authorization': `Basic ${Buffer.from(`${process.env.PLIVO_ACCOUNT_SID}:${process.env.PLIVO_AUTH_TOKEN}`).toString('base64')}`,
           },
       });
       console.log(`status: ${response.status} and call initiated for ${to}`)
@@ -243,7 +244,7 @@ async function insertListContent(rows) {
   // }
   
 
-async function createCampaign(campaignName, listId, fromNumber, wssUrl, clientId, isBalanceUpdated, isCampaignCompleted) {
+async function createCampaign(campaignName, listId, fromNumber, wssUrl, clientId, isBalanceUpdated, isCampaignCompleted, provider = null) {
   try {
     await connectToMongo();
     const database = client.db("talkGlimpass");
@@ -275,6 +276,9 @@ async function createCampaign(campaignName, listId, fromNumber, wssUrl, clientId
       createdAt: new Date(),
       isBalanceUpdated,
       isCampaignCompleted,
+      
+      // Provider-specific routing
+      provider: provider,              // Explicit provider (twilio/plivo) or null for auto-detection
       
       // Enhanced fields for pause/resume functionality
       status: "running",           // "running", "paused", "completed", "cancelled"
@@ -891,7 +895,7 @@ async function getSingleCampaignDetails(camp_id) {
 }
 
 
-async function makeCallViaCampaign(listId, fromNumber, wssUrl, campaignName, clientId) {
+async function makeCallViaCampaign(listId, fromNumber, wssUrl, campaignName, clientId, provider = null) {
   try {
       const listData = await getlistDataById(listId);
       const contactCount = listData.length;
@@ -924,7 +928,7 @@ async function makeCallViaCampaign(listId, fromNumber, wssUrl, campaignName, cli
           console.log(`✅ Balance validation passed: ${balanceCheck.balance} credits available for ${estimatedCost} estimated cost`);
       }
       
-      const result = await createCampaign(campaignName, listId, fromNumber, wssUrl, clientId, false, false);
+      const result = await createCampaign(campaignName, listId, fromNumber, wssUrl, clientId, false, false, provider);
       if (result === 0) {
           return { status: 500, message: 'Error while creating the campaign' };
       }
