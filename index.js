@@ -208,6 +208,16 @@ app.get('/', (req, res) => {
   });
 });
 
+// Bot warmup endpoint (no authentication required)
+app.get('/warmup', (req, res) => {
+  res.status(200).json({ 
+    status: 'ready', 
+    timestamp: new Date().toISOString(),
+    warmup: true,
+    message: 'Bot warmup successful'
+  });
+});
+
 // Public routes (no authentication required)
 app.use('/interlogue', interlogueRouter); // Contains both public /get-client and protected routes
 

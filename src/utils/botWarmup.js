@@ -19,6 +19,15 @@ async function warmupBotWithRetry(warmupUrl) {
     return { success: true, attempts: 0, duration: 0 };
   }
   
+  // Convert relative URL to absolute URL if needed
+  let fullWarmupUrl = warmupUrl;
+  if (warmupUrl.startsWith('/')) {
+    // Relative URL - construct full URL using BASE_URL or localhost
+    const baseUrl = process.env.BASE_URL || `http://localhost:${process.env.PORT || 7999}`;
+    fullWarmupUrl = `${baseUrl}${warmupUrl}`;
+    console.log(`🔗 Converting relative warmup URL to: ${fullWarmupUrl}`);
+  }
+  
   let attempts = 0;
   const startTime = Date.now();
   
@@ -28,7 +37,7 @@ async function warmupBotWithRetry(warmupUrl) {
     try {
       console.log(`🤖 Bot warmup attempt ${attempts}/${maxRetries}...`);
       
-      const response = await axios.get(warmupUrl, {
+      const response = await axios.get(fullWarmupUrl, {
         timeout: timeout,
         headers: {
           'User-Agent': 'GlimpassCallManager/1.0',
