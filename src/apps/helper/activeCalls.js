@@ -452,38 +452,53 @@ async function processSingleCall(callParams) {
     
     // Step 2: Bot warmup with retry logic
     let warmupResult = { success: true, attempts: 0, duration: 0 };
-    const warmupUrl = process.env.BOT_WARMUP_URL;
     const warmupEnabled = process.env.BOT_WARMUP_ENABLED !== 'false';
     
-    if (warmupEnabled && warmupUrl) {
-      console.log('🤖 Starting bot warmup...');
-      warmupResult = await warmupBotWithRetry(warmupUrl);
-      
-      if (!warmupResult.success) {
-        // Track failed call for reporting
-        const failedCallData = {
-          clientId,
-          campaignId,
-          from,
-          to,
-          failureReason: 'bot_not_ready',
-          warmupAttempts: warmupResult.attempts,
-          warmupDuration: warmupResult.duration
-        };
-        
-        const trackResult = await trackCallStart(failedCallData);
-        
-        return {
-          success: false,
-          error: `Bot warmup failed: ${warmupResult.error}`,
-          stage: 'bot_warmup',
-          warmupAttempts: warmupResult.attempts,
-          warmupDuration: warmupResult.duration,
-          callId: trackResult.callId
-        };
+    if (warmupEnabled && wssUrl) {
+      // Extract bot's base URL from WebSocket URL and create warmup endpoint
+      let botWarmupUrl;
+      try {
+        // Convert wss://live.glimpass.com/chat/v2/id → https://live.glimpass.com/warmup
+        const wsUrl = new URL(wssUrl);
+        const protocol = wsUrl.protocol === 'wss:' ? 'https:' : 'http:';
+        botWarmupUrl = `${protocol}//${wsUrl.host}/warmup`;
+        console.log(`🔗 Bot warmup URL extracted from wssUrl: ${botWarmupUrl}`);
+      } catch (error) {
+        console.error('❌ Failed to extract bot URL from wssUrl:', wssUrl, error.message);
+        // Skip warmup if URL extraction fails
+        warmupResult = { success: true, attempts: 0, duration: 0 };
       }
       
-      console.log(`✅ Bot warmup successful (${warmupResult.duration}ms, ${warmupResult.attempts} attempts)`);
+      if (botWarmupUrl) {
+        console.log('🤖 Starting bot warmup...');
+        warmupResult = await warmupBotWithRetry(botWarmupUrl);
+        
+        if (!warmupResult.success) {
+          // Track failed call for reporting
+          const failedCallData = {
+            clientId,
+            campaignId,
+            from,
+            to,
+            failureReason: 'bot_not_ready',
+            warmupAttempts: warmupResult.attempts,
+            warmupDuration: warmupResult.duration
+          };
+          
+          const trackResult = await trackCallStart(failedCallData);
+          
+          return {
+            success: false,
+            error: `Bot warmup failed: ${warmupResult.error}`,
+            stage: 'bot_warmup',
+            warmupAttempts: warmupResult.attempts,
+            warmupDuration: warmupResult.duration,
+            callId: trackResult.callId
+          };
+        }
+        
+        console.log(`✅ Bot warmup successful (${warmupResult.duration}ms, ${warmupResult.attempts} attempts)`);
+      }
     }
     
     // Step 3: Make unified provider call to get CallUUID
