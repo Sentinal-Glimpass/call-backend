@@ -77,7 +77,17 @@ class PlivoAdapter {
       
       let errorMessage = 'Plivo API call failed';
       if (error.response) {
-        errorMessage = `Plivo API error (${error.response.status}): ${error.response.data?.error || error.response.statusText}`;
+        const status = error.response.status;
+        const responseData = error.response.data;
+        
+        if (status === 401) {
+          errorMessage = `Plivo authentication failed (401): Invalid account SID or auth token. Check credentials for account: ${accountSid}`;
+          console.error(`🔑 Invalid Plivo credentials detected:`);
+          console.error(`   Account SID: ${accountSid}`);
+          console.error(`   Auth Token: ${authToken ? '[REDACTED - length: ' + authToken.length + ']' : '[MISSING]'}`);
+        } else {
+          errorMessage = `Plivo API error (${status}): ${responseData?.error || error.response.statusText}`;
+        }
       } else if (error.code === 'ECONNREFUSED') {
         errorMessage = 'Unable to connect to Plivo API';
       } else if (error.code === 'ETIMEDOUT') {

@@ -172,7 +172,7 @@ async function trackCallStart(callData) {
     };
 
     const callRecord = {
-      callUUID: callData.callUUID || null, // Will be updated when Plivo responds
+      callUUID: callData.callUUID || `FAILED_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`, // Unique ID for failed calls
       clientId: new ObjectId(callData.clientId),
       campaignId: toObjectIdSafe(callData.campaignId),
       from: callData.from,

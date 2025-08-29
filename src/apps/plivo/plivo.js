@@ -949,7 +949,7 @@ async function makeCallViaCampaign(listId, fromNumber, wssUrl, campaignName, cli
       
       // Start enhanced campaign processing with pause/resume awareness
       console.log(`🚀 Starting enhanced campaign processing: ${campaignName} (${result})`);
-      process.nextTick(() => processEnhancedCampaign(result, listData, fromNumber, wssUrl, clientId, listId));
+      process.nextTick(() => processEnhancedCampaign(result, listData, fromNumber, wssUrl, clientId, listId, provider));
       
       return { status: 200, message: 'Enhanced campaign processing started', campaignId: result };
   } catch (error) {
@@ -999,7 +999,7 @@ async function getFailedCallsFromCampaign(campId) {
 
 
 // Enhanced campaign processing with pause/resume awareness and heartbeat management
-async function processEnhancedCampaign(campaignId, listData, fromNumber, wssUrl, clientId, listId) {
+async function processEnhancedCampaign(campaignId, listData, fromNumber, wssUrl, clientId, listId, provider = null) {
   let heartbeatActive = false;
   
   try {
@@ -1112,6 +1112,7 @@ async function processEnhancedCampaign(campaignId, listData, fromNumber, wssUrl,
         firstName: contact.first_name,
         tag: assistantId, // Use assistantId for NEW billing system
         listId,
+        provider: provider, // Pass explicit provider for campaign-wide provider selection
         // Enhanced tracking for pause/resume
         contactIndex: i,                           // Position in list
         sequenceNumber: i + 1,                     // Sequence number (1-based)
@@ -1162,7 +1163,7 @@ async function processEnhancedCampaign(campaignId, listData, fromNumber, wssUrl,
 // Legacy function maintained for backward compatibility
 async function initiateCalls(listData, fromNumber, wssUrl, clientId, listId, campaignId) {
   console.log(`🔄 Legacy initiateCalls called - redirecting to enhanced processing`);
-  return processEnhancedCampaign(campaignId, listData, fromNumber, wssUrl, clientId, listId);
+  return processEnhancedCampaign(campaignId, listData, fromNumber, wssUrl, clientId, listId, null);
 }
 
 
@@ -1983,7 +1984,8 @@ async function resumeCampaign(campaignId) {
       campaign.fromNumber, 
       campaign.wssUrl, 
       campaign.clientId, 
-      campaign.listId
+      campaign.listId,
+      campaign.provider || null // Use stored campaign provider or null for auto-detection
     ));
     
     return { 
