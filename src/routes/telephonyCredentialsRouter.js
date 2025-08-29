@@ -734,10 +734,12 @@ router.get('/:clientId/:provider/phone-numbers', authenticateToken, auditLog, as
     // Get client's credentials for the provider
     const credentials = await TelephonyCredentialsService.getCredentials(clientId, provider);
     
-    if (!credentials || (!credentials.isClientSpecific && !credentials.isDefault)) {
+    // ONLY allow client-specific credentials - don't expose system default phone numbers
+    if (!credentials || !credentials.isClientSpecific) {
       return res.status(404).json({
         success: false,
-        error: `No ${provider} credentials found for client ${clientId}`
+        error: `No ${provider} credentials found for client ${clientId}. Please add your ${provider} credentials first.`,
+        suggestion: `Use PUT /telephony-credentials/${clientId}/${provider} to add your credentials`
       });
     }
     
@@ -792,7 +794,7 @@ router.get('/:clientId/:provider/phone-numbers', authenticateToken, auditLog, as
               status: 'unknown',
               note: 'Live validation failed, showing stored numbers'
             },
-            credentialsSource: credentials.isClientSpecific ? 'client-specific' : 'system-default',
+            credentialsSource: 'client-specific',
             validationStatus: 'failed-using-stored',
             fetchedAt: new Date().toISOString(),
             warning: `Live ${provider} validation failed: ${validationResult.error}`
@@ -841,7 +843,7 @@ router.get('/:clientId/:provider/phone-numbers', authenticateToken, auditLog, as
             name: 'Stored Account',
             status: 'validation-error'
           },
-          credentialsSource: credentials.isClientSpecific ? 'client-specific' : 'system-default',
+          credentialsSource: 'client-specific',
           validationStatus: 'error-using-stored',
           fetchedAt: new Date().toISOString(),
           warning: `Validation error, showing stored numbers: ${validationError.message}`
@@ -869,7 +871,7 @@ router.get('/:clientId/:provider/phone-numbers', authenticateToken, auditLog, as
         status: validationResult.account?.status || 'Unknown',
         ...(validationResult.balance && { balance: validationResult.balance })
       },
-      credentialsSource: credentials.isClientSpecific ? 'client-specific' : 'system-default',
+      credentialsSource: 'client-specific',
       fetchedAt: new Date().toISOString()
     };
     
