@@ -603,9 +603,12 @@ router.post('/create-campaign', authenticateToken, validateResourceOwnership, va
     const PhoneProviderService = require('../services/phoneProviderService');
     const TelephonyCredentialsService = require('../services/telephonyCredentialsService');
     
+    // Declare variables outside try-catch to avoid reference errors
+    let providerInfo = null;
+    let credentialsInfo = null;
+    
     try {
         // Determine provider - either explicitly provided or from phone number mapping
-        let providerInfo;
         if (provider) {
             console.log(`🎯 Using explicitly specified provider: ${provider}`);
             providerInfo = { provider: provider.toLowerCase(), phoneNumber: fromNumber, isExplicit: true };
@@ -613,8 +616,6 @@ router.post('/create-campaign', authenticateToken, validateResourceOwnership, va
             console.log(`🔍 Determining provider based on phone number mapping...`);
             providerInfo = await PhoneProviderService.getProvider(fromNumber);
         }
-        
-        let credentialsInfo;
         
         if (clientId) {
             credentialsInfo = await TelephonyCredentialsService.getCredentials(clientId, providerInfo.provider);
@@ -655,7 +656,14 @@ router.post('/create-campaign', authenticateToken, validateResourceOwnership, va
     
     res.status(status).send({message: message})
   } catch(error){
-    res.status(500).send({ message: "Internal Server Error", error });
+    console.error('❌ Campaign creation error:', error);
+    console.error('❌ Error stack:', error.stack);
+    console.error('❌ Error message:', error.message);
+    res.status(500).send({ 
+      message: "Internal Server Error", 
+      error: error.message || error.toString(),
+      details: error.stack 
+    });
   }
 })
 

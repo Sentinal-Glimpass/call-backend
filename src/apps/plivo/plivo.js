@@ -1266,7 +1266,7 @@ async function updateCampaignCallCredits(campaignId, totalCost, totalDuration) {
   try {
     await connectToMongo();
     const database = client.db("talkGlimpass");
-    const { saveCallBillingDetail } = require('./billing/billingCore');
+    const { saveCallBillingDetail } = require('../billing/billingCore');
     
     // Calculate credit per second for this campaign
     const creditPerSecond = totalDuration > 0 ? totalCost / totalDuration : 0;
@@ -2137,11 +2137,33 @@ async function getTestCallReport(clientId) {
     const recordCollection = database.collection("plivoRecordData");
 
     // Fetch all hangup data for test calls (campId = 'testcall') filtered by clientId
-    // Sort by EndTime (latest to oldest), with createdAt as fallback for records without EndTime
-    const hangupDataDocs = await hangupCollection.find({ 
-      campId: 'testcall',
-      clientId: clientId
-    }).sort({ EndTime: -1, createdAt: -1 }).toArray();
+    // Use aggregation pipeline to convert EndTime string to Date for proper sorting
+    const hangupDataDocs = await hangupCollection.aggregate([
+      {
+        $match: { 
+          campId: 'testcall',
+          clientId: clientId
+        }
+      },
+      {
+        $addFields: {
+          // Convert EndTime string to Date for sorting, fallback to createdAt if EndTime missing
+          sortDate: {
+            $cond: {
+              if: { $ne: ["$EndTime", null] },
+              then: { $dateFromString: { dateString: "$EndTime", onError: "$createdAt" } },
+              else: "$createdAt"
+            }
+          }
+        }
+      },
+      {
+        $sort: { sortDate: -1 } // Sort by converted date, latest first
+      },
+      {
+        $unset: "sortDate" // Remove the temporary field from results
+      }
+    ]).toArray();
 
     if (hangupDataDocs.length === 0) {
       return { status: 404, message: "No test call data found." };
@@ -2181,6 +2203,8 @@ async function getTestCallReport(clientId) {
         callType: 'testcall' // Mark as test call for identification
       };
     });
+
+    // Data is already sorted by database aggregation pipeline (EndTime latest to oldest)
 
     return {
       status: 200,
