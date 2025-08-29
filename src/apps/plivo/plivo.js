@@ -2137,10 +2137,11 @@ async function getTestCallReport(clientId) {
     const recordCollection = database.collection("plivoRecordData");
 
     // Fetch all hangup data for test calls (campId = 'testcall') filtered by clientId
+    // Sort by EndTime (latest to oldest), with createdAt as fallback for records without EndTime
     const hangupDataDocs = await hangupCollection.find({ 
       campId: 'testcall',
       clientId: clientId
-    }).sort({ createdAt: -1 }).toArray();
+    }).sort({ EndTime: -1, createdAt: -1 }).toArray();
 
     if (hangupDataDocs.length === 0) {
       return { status: 404, message: "No test call data found." };
