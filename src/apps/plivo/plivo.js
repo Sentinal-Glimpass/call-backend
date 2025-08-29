@@ -2197,6 +2197,7 @@ async function getTestCallReport(clientId) {
     insertList,
     insertListContent,
     getListByClientId,
+    getlistDataById,
     initiatePlivoCall,
     makeCallViaCampaign,
     getCampaignByClientId,
