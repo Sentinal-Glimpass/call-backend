@@ -16,6 +16,7 @@ According to FRONTEND_JWT_INTEGRATION.md, the login response should include:
 
 **Question**: Does the current `/interlogue/get-client` endpoint already return this new format, or does it still return the old format? The current frontend expects the response to be directly in `response.data` array format.
 
+
 ### 2. ClientId Injection
 The documentation states that `clientId` is automatically injected from JWT token by middleware.
 
