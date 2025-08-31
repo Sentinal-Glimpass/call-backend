@@ -719,9 +719,67 @@ router.post('/save-log-data', async(req,res)=>{
        
        const result = await saveLogData(data)
        
+       // CRITICAL: Update hangup record with bot conversation data for proper merging  
+       if (result.status === 200 && data.callUUID) {
+         try {
+           const { connectToMongo, client } = require('../../models/mongodb.js');
+           await connectToMongo();
+           const database = client.db("talkGlimpass");
+           const hangupCollection = database.collection("plivoHangupData");
+           
+           // Get existing record to preserve RecordUrl
+           const existingRecord = await hangupCollection.findOne({ CallUUID: data.callUUID });
+           
+           console.log(`🔍 DEBUG - Bot merge - Existing record RecordUrl:`, existingRecord?.RecordUrl);
+           
+           // Update hangup record with bot conversation data (preserve RecordUrl)
+           const hangupUpdate = {
+             $set: {
+               messages: data.messages || [],
+               conversation_time: data.conversation_time || null,
+               call_sid: data.call_sid || "",
+               stream_id: data.stream_id || "",
+               caller_number: data.caller_number || "",
+               ai_number: data.ai_number || "",
+               agent_id: data.agent_id || "",
+               lead_analysis: data.lead_analysis || null,
+               summary: data.summary || null,
+               chat: data.chat || null,
+               structuredOutputData: data.structuredOutputData || null,
+               caller: data.caller || "",
+               exophone: data.exophone || "",
+               // Mark that bot data has been merged
+               botDataMerged: new Date(),
+               // CRITICAL: Preserve existing RecordUrl if it exists
+               ...(existingRecord?.RecordUrl && { RecordUrl: existingRecord.RecordUrl })
+             }
+           };
+           
+           console.log(`🔍 DEBUG - Bot merge update RecordUrl:`, hangupUpdate.$set.RecordUrl);
+           
+           const mergeResult = await hangupCollection.updateOne(
+             { CallUUID: data.callUUID },
+             hangupUpdate
+           );
+           
+           if (mergeResult.modifiedCount > 0) {
+             console.log(`✅ Bot conversation data merged with hangup record: ${data.callUUID}`);
+             
+             // Check final state after merge
+             const finalRecord = await hangupCollection.findOne({ CallUUID: data.callUUID }, { RecordUrl: 1 });
+             console.log(`🔍 DEBUG - Final record after bot merge RecordUrl:`, finalRecord?.RecordUrl);
+           } else {
+             console.warn(`⚠️ No hangup record found to merge bot data: ${data.callUUID}`);
+           }
+         } catch (mergeError) {
+           console.error(`❌ Failed to merge bot data with hangup record:`, mergeError);
+           // Don't fail the main request if merge fails
+         }
+       }
+       
        // Update activeCalls status to 'completed' when bot data is received
        // Bot data only arrives after call has ended, so we can safely mark as completed
-       const { callUUID } = data;
+       let { callUUID } = data;
        if (callUUID) {
          try {
            const { connectToMongo, client } = require('../../models/mongodb.js');
@@ -729,8 +787,22 @@ router.post('/save-log-data', async(req,res)=>{
            const database = client.db("talkGlimpass");
            const activeCallsCollection = database.collection("activeCalls");
            
-           // Debug: Check current call status before update
-           const currentCall = await activeCallsCollection.findOne({ callUUID: callUUID });
+           // CRITICAL: Handle Twilio CallSids - look up by twilioCallSid first
+           let currentCall = await activeCallsCollection.findOne({ callUUID: callUUID });
+           
+           // If not found by callUUID, try looking up by twilioCallSid (for Twilio calls)
+           if (!currentCall && callUUID.startsWith('CA')) {
+             console.log(`🔍 Twilio CallSid detected: ${callUUID}, looking up by twilioCallSid...`);
+             currentCall = await activeCallsCollection.findOne({ twilioCallSid: callUUID });
+             
+             if (currentCall) {
+               // Update data.callUUID to use our internal UUID for saveLogData
+               console.log(`✅ Found Twilio call: ${callUUID} -> ${currentCall.callUUID}`);
+               data.callUUID = currentCall.callUUID; // Replace Twilio CallSid with our UUID
+               callUUID = currentCall.callUUID; // Update local variable too
+             }
+           }
+           
            console.log(`🔍 DEBUG: Bot data received for CallUUID ${callUUID}`);
            console.log(`🔍 DEBUG: Current call status: ${currentCall?.status || 'NOT FOUND'}`);
            

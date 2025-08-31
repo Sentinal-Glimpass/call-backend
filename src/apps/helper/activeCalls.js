@@ -198,17 +198,37 @@ async function trackCallStart(callData) {
       createdAt: new Date()
     };
     
-    const result = await activeCallsCollection.insertOne(callRecord);
-    
-    console.log(`📞 Call tracked: ${callData.to} (${callData.clientId})`);
-    
-    return {
-      success: true,
-      callId: result.insertedId.toString(),
-      activeCallsCount: await activeCallsCollection.countDocuments({ 
-        status: { $in: ['processed', 'ringing', 'ongoing'] } 
-      })
-    };
+    try {
+      const result = await activeCallsCollection.insertOne(callRecord);
+      
+      console.log(`📞 Call tracked: ${callData.to} (${callData.clientId})`);
+      
+      return {
+        success: true,
+        callId: result.insertedId.toString(),
+        activeCallsCount: await activeCallsCollection.countDocuments({ 
+          status: { $in: ['processed', 'ringing', 'ongoing'] } 
+        })
+      };
+    } catch (insertError) {
+      // Handle duplicate key error (E11000)
+      if (insertError.code === 11000 && insertError.keyValue?.callUUID) {
+        console.warn(`⚠️ Duplicate callUUID detected: ${insertError.keyValue.callUUID} - call already tracked`);
+        
+        // Return success since the call is already tracked
+        return {
+          success: true,
+          callId: null, // Can't provide the ID since insert failed
+          activeCallsCount: await activeCallsCollection.countDocuments({ 
+            status: { $in: ['processed', 'ringing', 'ongoing'] } 
+          }),
+          warning: 'Call already tracked (duplicate UUID)'
+        };
+      }
+      
+      // Re-throw other errors
+      throw insertError;
+    }
     
   } catch (error) {
     console.error('❌ Error tracking call start:', error);

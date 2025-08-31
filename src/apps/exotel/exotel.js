@@ -1347,7 +1347,18 @@ async function getPlivoCampaignDetails(camp_id) {
     const database = client.db("talkGlimpass");
     const collection = database.collection("plivoCampaign");
 
-    const campaignData = collection.find({_id: new ObjectId(camp_id)}).toArray();
+    // Handle special campaign IDs like 'testcall', 'incoming' that aren't ObjectIds
+    let campaignData;
+    if (camp_id === 'testcall' || camp_id === 'incoming' || camp_id === 'undefined') {
+      // For special campaign types, return empty array (no campaign details needed)
+      campaignData = [];
+    } else if (camp_id && camp_id.match && camp_id.match(/^[0-9a-fA-F]{24}$/)) {
+      // Valid ObjectId format
+      campaignData = await collection.find({_id: new ObjectId(camp_id)}).toArray();
+    } else {
+      // Invalid or missing camp_id
+      campaignData = [];
+    }
 
     return campaignData;
   } catch (error) {

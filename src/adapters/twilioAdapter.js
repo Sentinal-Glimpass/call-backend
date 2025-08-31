@@ -75,7 +75,10 @@ class TwilioAdapter {
         statusCallbackMethod: 'POST',
         method: 'POST',
         timeout: 60, // Ring timeout in seconds
-        record: false // We'll handle recording via TwiML
+        record: true, // Enable recording
+        recordingStatusCallback: `${baseUrl}/twilio/record-callback`,
+        recordingStatusCallbackEvent: ['completed'],
+        recordingStatusCallbackMethod: 'POST'
       };
       
       console.log(`🔵 Twilio API Call with pre-saved UUID:`);
@@ -230,7 +233,6 @@ class TwilioAdapter {
    */
   static generateTwiML(params) {
     const { wssUrl, callSid, clientId, campaignId, listId, firstName, from, to, tag } = params;
-    const baseUrl = process.env.BASE_URL || 'https://application.glimpass.com';
     
     // Sanitize phone numbers (remove + prefix like Plivo does)
     const sanitizeNumber = (num) => {
@@ -241,12 +243,11 @@ class TwilioAdapter {
     const sanitizedFrom = sanitizeNumber(from);
     const sanitizedTo = sanitizeNumber(to);
     
+    // Use simpler Connect + Stream approach like the Python reference server (this was working!)
     return `<?xml version="1.0" encoding="UTF-8"?>
 <Response>
-    <Start>
-        <Stream 
-            url="${wssUrl}"
-            name="audio_stream">
+    <Connect>
+        <Stream url="${wssUrl}">
             <Parameter name="from" value="${sanitizedFrom}" />
             <Parameter name="to" value="${sanitizedTo}" />
             <Parameter name="callUUID" value="${callSid || ''}" />
@@ -256,13 +257,7 @@ class TwilioAdapter {
             <Parameter name="firstName" value="${firstName || ''}" />
             <Parameter name="provider" value="twilio" />
         </Stream>
-    </Start>
-    <Record 
-        action="${baseUrl}/twilio/record-callback"
-        recordingStatusCallback="${baseUrl}/twilio/record-status"
-        maxLength="3600"
-        playBeep="false" />
-    <Say voice="alice">Please wait while we connect you.</Say>
+    </Connect>
 </Response>`;
   }
 }

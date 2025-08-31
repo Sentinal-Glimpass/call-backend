@@ -1282,6 +1282,264 @@ router.post('/get-test-call-report', authenticateToken, validateResourceOwnershi
     res.status(500).send({ message: "Internal Server Error", error });
   }
 })
+
+/**
+ * @swagger
+ * /plivo/get-recording-stream-url:
+ *   post:
+ *     tags: [Plivo]
+ *     summary: Get authenticated recording stream URL
+ *     description: Validates client ownership and returns authenticated URL for recording playback
+ *     security:
+ *       - BearerAuth: []
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - clientId
+ *               - recordingUrl
+ *             properties:
+ *               clientId:
+ *                 type: string
+ *                 description: The client ID who owns this recording
+ *                 example: "688d42040633f48913672d43"
+ *               recordingUrl:
+ *                 type: string
+ *                 description: The Twilio recording URL to authenticate
+ *                 example: "https://api.twilio.com/2010-04-01/Accounts/ACxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx/Recordings/RExxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+ *     responses:
+ *       200:
+ *         description: Authenticated streaming URL returned
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 streamUrl:
+ *                   type: string
+ *                   example: "https://api.twilio.com/2010-04-01/Accounts/ACxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx/Recordings/RExxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx.mp3"
+ *                 provider:
+ *                   type: string
+ *                   example: "twilio"
+ *                 credentialSource:
+ *                   type: string
+ *                   example: "client-specific"
+ *       400:
+ *         description: Bad request - missing parameters
+ *       403:
+ *         description: Forbidden - invalid credentials
+ *       404:
+ *         description: Recording not accessible
+ */
+router.post('/get-recording-stream-url', authenticateToken, validateResourceOwnership, auditLog, async(req, res) => {
+  try {
+    const { clientId, recordingUrl } = req.body;
+    
+    if (!clientId || !recordingUrl) {
+      return res.status(400).json({ 
+        error: 'Missing required parameters', 
+        message: 'clientId and recordingUrl are required' 
+      });
+    }
+    
+    // Check if this is a Twilio recording URL
+    if (!recordingUrl.includes('api.twilio.com')) {
+      return res.status(400).json({ 
+        error: 'Unsupported recording format', 
+        message: 'Only Twilio recording URLs are currently supported' 
+      });
+    }
+    
+    const TelephonyCredentialsService = require('../services/telephonyCredentialsService');
+    
+    // Try to get client-specific Twilio credentials
+    let credentials = await TelephonyCredentialsService.getCredentials(clientId, 'twilio');
+    let credentialSource = 'client-specific';
+    
+    // If no client-specific credentials, fall back to default
+    if (!credentials) {
+      console.log(`📻 No client-specific Twilio creds for ${clientId}, using default credentials`);
+      credentials = {
+        accountSid: process.env.TWILIO_ACCOUNT_SID,
+        authToken: process.env.TWILIO_AUTH_TOKEN
+      };
+      credentialSource = 'default';
+      
+      if (!credentials.accountSid || !credentials.authToken) {
+        return res.status(503).json({ 
+          error: 'Service unavailable', 
+          message: 'No Twilio credentials available for recording access' 
+        });
+      }
+    }
+    
+    // Validate the recording URL belongs to the account we have credentials for
+    const urlAccountSid = recordingUrl.match(/\/Accounts\/([^\/]+)\//);
+    if (!urlAccountSid) {
+      return res.status(400).json({ 
+        error: 'Invalid recording URL', 
+        message: 'Could not extract account SID from recording URL' 
+      });
+    }
+    
+    const recordingAccountSid = urlAccountSid[1];
+    if (recordingAccountSid !== credentials.accountSid) {
+      return res.status(403).json({ 
+        error: 'Access denied', 
+        message: 'Recording belongs to different Twilio account' 
+      });
+    }
+    
+    // Create our own proxy streaming URL instead of returning Twilio URL directly
+    const streamUrl = `${process.env.BASE_URL || 'https://api.markaible.com'}/plivo/stream-recording/${clientId}/${encodeURIComponent(recordingUrl)}`;
+    
+    console.log(`🎵 Generated proxy recording stream URL for client ${clientId} (${credentialSource})`);
+    
+    res.json({
+      streamUrl: streamUrl,
+      provider: 'twilio',
+      credentialSource: credentialSource
+    });
+    
+  } catch(error) {
+    console.error('❌ Error generating recording stream URL:', error);
+    console.error('❌ Stack trace:', error.stack);
+    res.status(500).json({ 
+      error: 'Internal server error',
+      message: 'Failed to generate recording stream URL',
+      details: error.message 
+    });
+  }
+})
+
+/**
+ * @swagger
+ * /plivo/stream-recording/{clientId}/{recordingUrl}:
+ *   get:
+ *     tags: [Plivo]
+ *     summary: Stream authenticated recording audio
+ *     description: Proxy endpoint that authenticates with Twilio and streams recording audio
+ *     parameters:
+ *       - in: path
+ *         name: clientId
+ *         required: true
+ *         schema:
+ *           type: string
+ *         description: The client ID who owns this recording
+ *       - in: path
+ *         name: recordingUrl
+ *         required: true
+ *         schema:
+ *           type: string
+ *         description: URL-encoded Twilio recording URL
+ *     responses:
+ *       200:
+ *         description: Audio stream
+ *         content:
+ *           audio/mpeg:
+ *             schema:
+ *               type: string
+ *               format: binary
+ *       403:
+ *         description: Forbidden - invalid credentials
+ *       404:
+ *         description: Recording not found
+ */
+router.get('/stream-recording/:clientId/:recordingUrl(*)', async(req, res) => {
+  try {
+    const { clientId, recordingUrl } = req.params;
+    const decodedRecordingUrl = decodeURIComponent(recordingUrl);
+    
+    console.log(`🎵 Streaming recording for client: ${clientId}`);
+    console.log(`🎵 Recording URL: ${decodedRecordingUrl}`);
+    
+    // Validate this is a Twilio recording URL
+    if (!decodedRecordingUrl.includes('api.twilio.com')) {
+      return res.status(400).json({ 
+        error: 'Unsupported recording format', 
+        message: 'Only Twilio recording URLs are supported' 
+      });
+    }
+    
+    const TelephonyCredentialsService = require('../services/telephonyCredentialsService');
+    
+    // Get client-specific Twilio credentials or fall back to default
+    let credentials = await TelephonyCredentialsService.getCredentials(clientId, 'twilio');
+    if (!credentials) {
+      console.log(`📻 Using default Twilio credentials for client ${clientId}`);
+      credentials = {
+        accountSid: process.env.TWILIO_ACCOUNT_SID,
+        authToken: process.env.TWILIO_AUTH_TOKEN
+      };
+      
+      if (!credentials.accountSid || !credentials.authToken) {
+        return res.status(503).json({ 
+          error: 'Service unavailable', 
+          message: 'No Twilio credentials available' 
+        });
+      }
+    }
+    
+    // Validate the recording belongs to our account
+    const urlAccountSid = decodedRecordingUrl.match(/\/Accounts\/([^\/]+)\//);
+    if (!urlAccountSid || urlAccountSid[1] !== credentials.accountSid) {
+      return res.status(403).json({ 
+        error: 'Access denied', 
+        message: 'Recording belongs to different account' 
+      });
+    }
+    
+    // Stream the recording from Twilio with authentication
+    const axios = require('axios');
+    const audioUrl = `${decodedRecordingUrl}.mp3`;
+    
+    console.log(`🎵 Fetching audio from Twilio: ${audioUrl}`);
+    
+    const response = await axios({
+      method: 'GET',
+      url: audioUrl,
+      auth: {
+        username: credentials.accountSid,
+        password: credentials.authToken
+      },
+      responseType: 'stream'
+    });
+    
+    // Set appropriate headers for audio streaming
+    res.setHeader('Content-Type', 'audio/mpeg');
+    res.setHeader('Accept-Ranges', 'bytes');
+    res.setHeader('Cache-Control', 'public, max-age=3600'); // Cache for 1 hour
+    
+    // Pipe the Twilio audio response directly to our response
+    response.data.pipe(res);
+    
+    console.log(`✅ Audio streaming started for client ${clientId}`);
+    
+  } catch(error) {
+    console.error('❌ Error streaming recording:', error);
+    
+    if (error.response?.status === 404) {
+      return res.status(404).json({ 
+        error: 'Recording not found', 
+        message: 'The requested recording could not be found' 
+      });
+    } else if (error.response?.status === 401) {
+      return res.status(403).json({ 
+        error: 'Authentication failed', 
+        message: 'Invalid Twilio credentials' 
+      });
+    }
+    
+    res.status(500).json({ 
+      error: 'Internal server error',
+      message: 'Failed to stream recording' 
+    });
+  }
+})
+
 router.post('/callback-url', async(req, res) => {
   try{
     const { Event, CallUUID } = req.body;

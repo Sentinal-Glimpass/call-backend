@@ -636,7 +636,8 @@ async function getMergedLogData(campId) {
       return {
         ...hangupDoc,
         ...logData, // Merge latest log data
-        RecordUrl: recordMap.get(hangupDoc.CallUUID) || null, // Attach RecordUrl if found
+        // CRITICAL: Preserve RecordUrl from hangup data (Twilio), fallback to record collection (Plivo)
+        RecordUrl: hangupDoc.RecordUrl || recordMap.get(hangupDoc.CallUUID) || null,
       };
     });
 
@@ -839,7 +840,8 @@ async function getIncomingReport(fromNumber, cursor = null, limit = 20, dateRang
       return {
         ...hangupDoc,
         ...logData, // Merge latest log data
-        RecordUrl: recordMap.get(hangupDoc.CallUUID) || null, // Attach RecordUrl if found
+        // CRITICAL: Preserve RecordUrl from hangup data (Twilio), fallback to record collection (Plivo)
+        RecordUrl: hangupDoc.RecordUrl || recordMap.get(hangupDoc.CallUUID) || null,
       };
     });
 
@@ -1008,6 +1010,56 @@ async function processEnhancedCampaign(campaignId, listData, fromNumber, wssUrl,
     // Start heartbeat timer for container health monitoring
     const heartbeatResult = await startHeartbeat(campaignId);
     heartbeatActive = heartbeatResult.success;
+    
+    // Multi-pod warmup: Warm up N pods where N = client's maxConcurrentCalls
+    const { warmupMultiplePods } = require('../../utils/botWarmup.js');
+    const { connectToMongo, client } = require('../../../models/mongodb.js');
+    const { ObjectId } = require('mongodb');
+    
+    let multiPodWarmupResult = { success: true, successCount: 0, totalPods: 0 };
+    const warmupEnabled = process.env.BOT_WARMUP_ENABLED !== 'false';
+    
+    if (warmupEnabled && wssUrl) {
+      try {
+        // Get client's concurrency limit to determine how many pods to warm up
+        await connectToMongo();
+        const database = client.db("talkGlimpass");
+        const clientCollection = database.collection("client");
+        const clientData = await clientCollection.findOne(
+          { _id: new ObjectId(clientId) },
+          { projection: { maxConcurrentCalls: 1 } }
+        );
+        
+        const maxConcurrentCalls = clientData?.maxConcurrentCalls || parseInt(process.env.DEFAULT_CLIENT_MAX_CONCURRENT_CALLS) || 10;
+        
+        // Extract bot's base URL from WebSocket URL and create warmup endpoint
+        let botWarmupUrl;
+        try {
+          const wsUrl = new URL(wssUrl);
+          const protocol = wsUrl.protocol === 'wss:' ? 'https:' : 'http:';
+          botWarmupUrl = `${protocol}//${wsUrl.host}/warmup`;
+          console.log(`🔗 Bot warmup URL extracted from campaign wssUrl: ${botWarmupUrl}`);
+        } catch (error) {
+          console.error('❌ Failed to extract bot URL from campaign wssUrl:', wssUrl, error.message);
+          botWarmupUrl = null;
+        }
+        
+        if (botWarmupUrl) {
+          console.log(`🔥 Starting multi-pod warmup for campaign: ${maxConcurrentCalls} pods...`);
+          multiPodWarmupResult = await warmupMultiplePods(botWarmupUrl, maxConcurrentCalls);
+          
+          if (multiPodWarmupResult.success) {
+            console.log(`✅ Campaign multi-pod warmup completed: ${multiPodWarmupResult.successCount}/${multiPodWarmupResult.totalPods} pods ready (${multiPodWarmupResult.duration}ms)`);
+          } else {
+            console.error(`❌ Campaign multi-pod warmup failed: ${multiPodWarmupResult.error}`);
+            // Continue with campaign even if warmup fails
+          }
+        }
+      } catch (warmupError) {
+        console.error('❌ Error during campaign multi-pod warmup:', warmupError.message);
+        // Continue with campaign even if warmup fails
+      }
+    }
     
     // Import the unified call processing system
     const { processSingleCall } = require('../helper/activeCalls.js');
@@ -2137,12 +2189,14 @@ async function getTestCallReport(clientId) {
     const recordCollection = database.collection("plivoRecordData");
 
     // Fetch all hangup data for test calls (campId = 'testcall') filtered by clientId
+    // Include both Plivo and Twilio test calls for unified reporting
     // Use aggregation pipeline to convert EndTime string to Date for proper sorting
     const hangupDataDocs = await hangupCollection.aggregate([
       {
         $match: { 
           campId: 'testcall',
           clientId: clientId
+          // No provider filter - include both Plivo and Twilio calls
         }
       },
       {
@@ -2199,7 +2253,8 @@ async function getTestCallReport(clientId) {
       return {
         ...hangupDoc,
         ...logData, // Merge latest log data (includes bot callback data, lead analysis, conversation logs)
-        RecordUrl: recordMap.get(hangupDoc.CallUUID) || null, // Attach RecordUrl if found
+        // CRITICAL: Preserve RecordUrl from hangup data (Twilio), fallback to record collection (Plivo)
+        RecordUrl: hangupDoc.RecordUrl || recordMap.get(hangupDoc.CallUUID) || null,
         callType: 'testcall' // Mark as test call for identification
       };
     });

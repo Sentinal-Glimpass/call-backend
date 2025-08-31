@@ -45,7 +45,7 @@ const { connectToMongo, client } = require('../../models/mongodb.js');
  */
 router.post('/twiml', (req, res) => {
   try {
-    const { wss, clientId, campId, listId, firstName, tag } = req.query;
+    const { wss, clientId, campId, listId, firstName, tag, preUUID } = req.query;
     const { CallSid, From, To } = req.body;
     
     console.log(`🔵 Twilio TwiML request:`);
@@ -68,14 +68,15 @@ router.post('/twiml', (req, res) => {
     // Generate TwiML response with all available data (matching Plivo extraHeaders)
     const twiml = TwilioAdapter.generateTwiML({
       wssUrl: wss,
-      callSid: CallSid,
+      callSid: preUUID || CallSid, // Use our pre-generated UUID if available
       clientId: clientId,
       campaignId: campId,
       listId: listId,
       firstName: firstName,
       from: From,
       to: To,
-      tag: tag
+      tag: tag,
+      twilioCallSid: CallSid // Keep Twilio CallSid for debugging
     });
     
     console.log(`✅ Generated TwiML for call ${CallSid}`);
@@ -159,45 +160,82 @@ router.post('/status-callback', async (req, res) => {
       updateData.duration = parseInt(Duration);
       updateData.endTime = new Date();
       
-      // Also save hangup data for consistency with Plivo system
+      // CRITICAL: Look up call record by Twilio CallSid to get our pre-generated UUID and client info
+      const callRecord = await activeCallsCollection.findOne(
+        { twilioCallSid: CallSid },
+        { projection: { callUUID: 1, clientId: 1, campaignId: 1 } }
+      );
+      
+      if (!callRecord) {
+        console.error(`❌ No call record found for Twilio CallSid: ${CallSid}`);
+        return res.status(200).type('application/xml').send('<?xml version="1.0" encoding="UTF-8"?><Response></Response>');
+      }
+      
+      const ourCallUUID = callRecord.callUUID; // Use our pre-generated UUID, not Twilio's CallSid
+      
+      // Determine campaign type for use in both hangup data and billing
+      const campId = callRecord?.campaignId === 'testcall' ? 'testcall' : (callRecord?.campaignId?.toString() || 'incoming');
+      
+      // Map Twilio data to exact Plivo format for frontend compatibility
       try {
         const hangupCollection = database.collection("plivoHangupData");
-        const { CallDuration, SipResponseCode } = req.body;
+        const { mapTwilioHangupToPlivoFormat } = require('../adapters/twilioToPlivoMapper.js');
         
-        // Get clientId and campaignId from activeCalls record
-        const callRecord = await activeCallsCollection.findOne(
-          { callUUID: CallSid },
-          { projection: { clientId: 1, campaignId: 1 } }
-        );
+        // Debug: Check if RecordingUrl is in the status callback
+        if (req.body.RecordingUrl) {
+          console.log(`🎬 Recording URL found in status callback: ${req.body.RecordingUrl}`);
+        }
         
-        const hangupData = {
-          CallUUID: CallSid,
-          From: From,
-          To: To,
-          CallStatus: 'completed', // Map to Plivo format
-          Duration: Duration ? parseInt(Duration) : 0,
-          BillDuration: CallDuration ? parseInt(CallDuration) : 0,
-          HangupCause: SipResponseCode === '200' ? 'NORMAL_CLEARING' : 'CALL_REJECTED',
-          HangupCauseCode: SipResponseCode || '200',
-          Provider: 'twilio',
-          Event: 'Hangup',
-          EndTime: new Date().toISOString().replace('T', ' ').substring(0, 19),
-          createdAt: new Date(),
-          // Add missing fields from call record for proper reporting
-          clientId: callRecord?.clientId?.toString() || null,
-          campId: callRecord?.campaignId === 'testcall' ? 'testcall' : (callRecord?.campaignId?.toString() || 'incoming')
-        };
+        console.log(`🔍 DEBUG - Raw Twilio data:`, JSON.stringify({
+          CallSid: req.body.CallSid,
+          RecordingUrl: req.body.RecordingUrl,
+          Duration: req.body.Duration,
+          CallDuration: req.body.CallDuration
+        }, null, 2));
+        
+        // Transform Twilio data to Plivo format
+        const hangupData = mapTwilioHangupToPlivoFormat(req.body, {
+          ...callRecord,
+          tag: callRecord.tag || '',
+          firstName: callRecord.firstName || ''
+        });
+        
+        console.log(`🔍 DEBUG - Mapped hangup data RecordUrl:`, hangupData.RecordUrl);
         
         await hangupCollection.insertOne(hangupData);
-        console.log(`✅ Twilio hangup data saved for call ${CallSid} (clientId: ${hangupData.clientId}, campId: ${hangupData.campId})`);
+        
+        // Fetch and log what was actually saved
+        const savedRecord = await hangupCollection.findOne({ CallUUID: ourCallUUID }, { RecordUrl: 1, Duration: 1, BillDuration: 1 });
+        console.log(`🔍 DEBUG - Saved record:`, JSON.stringify(savedRecord, null, 2));
+        
+        console.log(`✅ Twilio hangup data saved in Plivo format for call ${ourCallUUID} -> Twilio SID ${CallSid}`);
+        console.log(`   Client: ${hangupData.clientId}, Campaign: ${hangupData.campId}, Duration: ${hangupData.Duration}s`);
+        console.log(`   Recording URL: ${hangupData.RecordUrl || 'STILL NULL!'}`);
+        console.log(`   BillDuration: ${hangupData.BillDuration}s`);
       } catch (hangupError) {
         console.error('❌ Error saving Twilio hangup data:', hangupError);
+      }
+      
+      // Track call end using our UUID (for compatibility with Plivo tracking)
+      const { trackCallEnd } = require('../apps/helper/activeCalls.js');
+      try {
+        const endResult = await trackCallEnd(ourCallUUID);
+        if (!endResult.success) {
+          console.warn(`⚠️ Failed to track Twilio call end: ${endResult.error}`);
+        } else {
+          console.log(`✅ Tracked Twilio call end: ${ourCallUUID}`);
+        }
+      } catch (trackError) {
+        console.error(`❌ Error tracking Twilio call end:`, trackError);
       }
       
       // CRITICAL: Add missing billing operations that Plivo hangup handler does
       if (callRecord?.clientId) {
         try {
-          console.log(`💰 Processing Twilio billing for call: ${CallSid}, Type: ${hangupData.campId}, Duration: ${Duration}s`);
+          
+          const { CallDuration } = req.body;
+          const billingDuration = parseInt(CallDuration) || parseInt(Duration) || 0;
+          console.log(`💰 Processing Twilio billing for call: ${CallSid}, Type: ${campId}, Duration: ${billingDuration}s (CallDuration: ${CallDuration}, Duration: ${Duration})`);
           
           const { 
             saveCallBillingDetail, 
@@ -208,9 +246,9 @@ router.post('/status-callback', async (req, res) => {
           
           // Determine call type
           let callType;
-          if (hangupData.campId === 'incoming') {
+          if (campId === 'incoming') {
             callType = 'incoming';
-          } else if (hangupData.campId === 'testcall') {
+          } else if (campId === 'testcall') {
             callType = 'testcall';
           } else {
             callType = 'campaign';
@@ -225,12 +263,11 @@ router.post('/status-callback', async (req, res) => {
             throw new Error(`Client not found: ${clientId}`);
           }
           
-          const duration = parseInt(Duration) || 0;
-          const creditsToDeduct = duration; // 1 second = 1 credit
+          const creditsToDeduct = billingDuration; // 1 second = 1 credit (use CallDuration)
           const currentBalance = existingClient.availableBalance || 0;
           const newBalance = currentBalance - creditsToDeduct;
           
-          console.log(`💰 Twilio Billing: ${callType} call - ${creditsToDeduct} credits (duration: ${duration}s)`);
+          console.log(`💰 Twilio Billing: ${callType} call - ${creditsToDeduct} credits (duration: ${billingDuration}s)`);
           console.log(`💰 Current Balance: ${currentBalance} -> ${newBalance}`);
           
           // Update client balance immediately for ALL calls
@@ -258,10 +295,10 @@ router.post('/status-callback', async (req, res) => {
             
             let billingDescription, campName;
             if (callType === 'testcall') {
-              billingDescription = `Test call to ${To} for ${duration} seconds`;
+              billingDescription = `Test call to ${To} for ${billingDuration} seconds`;
               campName = 'Test Call';
             } else {
-              billingDescription = `Incoming call from ${From} for ${duration} seconds`;
+              billingDescription = `Incoming call from ${From} for ${billingDuration} seconds`;
               campName = 'Incoming Call';
             }
             
@@ -275,7 +312,7 @@ router.post('/status-callback', async (req, res) => {
               transactionType: 'Dr',
               newAvailableBalance: newBalance,
               callUUID: CallSid,
-              callDuration: duration,
+              callDuration: billingDuration,
               callType: callType,
               from: From,
               to: To
@@ -291,15 +328,15 @@ router.post('/status-callback', async (req, res) => {
           await saveCallBillingDetail({
             clientId: clientId,
             callUuid: CallSid,
-            duration: duration,
+            duration: billingDuration,
             type: callType,
             from: From,
             to: To,
             credits: creditsToDeduct,
             aiCredits: 0,
             telephonyCredits: creditsToDeduct,
-            campaignId: callType === 'campaign' ? hangupData.campId : null,
-            campaignName: callType === 'campaign' ? `Campaign ${hangupData.campId}` : null
+            campaignId: callType === 'campaign' ? campId : null,
+            campaignName: callType === 'campaign' ? `Campaign ${campId}` : null
           });
           
           console.log(`✅ Twilio call billing processed: ${creditsToDeduct} credits deducted, balance updated to ${newBalance} (Call Type: ${callType})`);
@@ -310,18 +347,7 @@ router.post('/status-callback', async (req, res) => {
         }
       }
       
-      // Track call end in database system
-      const { trackCallEnd } = require('../apps/helper/activeCalls.js');
-      const endResult = await trackCallEnd(CallSid, {
-        duration: parseInt(Duration) || null,
-        endReason: 'completed'
-      });
-      
-      if (!endResult.success) {
-        console.warn(`⚠️ Failed to track Twilio call end: ${endResult.error}`);
-      } else {
-        console.log(`✅ Twilio call end tracked: ${CallSid} (Active calls: ${endResult.activeCallsCount || 'unknown'})`);
-      }
+      // This is now handled above with our UUID-based tracking system
     }
     
     // NEW APPROACH: Search by twilioCallSid field (our UUID system)
@@ -401,42 +427,62 @@ router.post('/record-callback', async (req, res) => {
     console.log(`   Duration: ${RecordingDuration}`);
     
     if (!CallSid) {
-      return res.status(400).json({ error: 'Missing CallSid' });
+      return res.status(400).type('application/xml').send('<?xml version="1.0" encoding="UTF-8"?><Response></Response>');
     }
     
-    // Store recording data in the same collection as Plivo for consistency
+    // CRITICAL: Look up call record by Twilio CallSid to get our pre-generated UUID
     await connectToMongo();
     const database = client.db("talkGlimpass");
-    const recordCollection = database.collection("plivoRecordData"); // Use exact same collection as Plivo
+    const activeCallsCollection = database.collection("activeCalls");
     
-    // CRITICAL: Add duplicate prevention logic that Plivo saveRecordData() has
-    const existingRecord = await recordCollection.findOne({ CallUUID: CallSid });
-    if (existingRecord) {
-      console.log(`⚠️ Twilio record with CallUUID ${CallSid} already exists - skipping duplicate`);
-      return res.status(409).json({ message: "Record with this CallUUID already exists." });
+    const callRecord = await activeCallsCollection.findOne(
+      { twilioCallSid: CallSid },
+      { projection: { callUUID: 1, clientId: 1, campaignId: 1 } }
+    );
+    
+    if (!callRecord) {
+      console.error(`❌ No call record found for Twilio recording CallSid: ${CallSid}`);
+      return res.status(404).type('application/xml').send('<?xml version="1.0" encoding="UTF-8"?><Response></Response>');
     }
     
-    const recordData = {
-      CallUUID: CallSid,  // Use same field name as Plivo
-      From: From,
-      To: To,
-      RecordingUrl: RecordingUrl,
-      RecordingSid: RecordingSid,
-      RecordingDuration: RecordingDuration ? parseInt(RecordingDuration) : 0,
-      Provider: 'twilio', // Mark as Twilio record
-      Event: 'Recording', // Same as Plivo format
-      RecordingCreatedAt: new Date(),
-      createdAt: new Date()
-    };
+    const ourCallUUID = callRecord.callUUID; // Use our pre-generated UUID
     
+    // Map recording data to Plivo format and update hangup record
+    const { mapTwilioRecordingToPlivoFormat, createRecordingUrlUpdate } = require('../adapters/twilioToPlivoMapper.js');
+    
+    // Store recording data in the same collection as Plivo for consistency
+    const recordCollection = database.collection("plivoRecordData");
+    const hangupCollection = database.collection("plivoHangupData");
+    
+    // CRITICAL: Add duplicate prevention logic using our UUID (like Plivo saveRecordData())
+    const existingRecord = await recordCollection.findOne({ CallUUID: ourCallUUID });
+    if (existingRecord) {
+      console.log(`⚠️ Twilio record with CallUUID ${ourCallUUID} already exists - skipping duplicate`);
+      return res.status(409).type('application/xml').send('<?xml version="1.0" encoding="UTF-8"?><Response></Response>');
+    }
+    
+    // Transform Twilio recording data to Plivo format
+    const recordData = mapTwilioRecordingToPlivoFormat(req.body, callRecord);
+    
+    // Save recording data
     await recordCollection.insertOne(recordData);
-    console.log(`✅ Twilio recording data saved for call ${CallSid}`);
     
-    res.status(200).json({ message: 'Recording callback processed' });
+    // CRITICAL: Update hangup record with recording URL (like Plivo does)
+    const recordingUpdateResult = await hangupCollection.updateOne(
+      { CallUUID: ourCallUUID },
+      createRecordingUrlUpdate(RecordingUrl, ourCallUUID)
+    );
+    
+    console.log(`✅ Twilio recording data saved in Plivo format for call ${ourCallUUID} -> Twilio SID ${CallSid}`);
+    console.log(`   Recording URL: ${RecordingUrl}`);
+    console.log(`   Client ID: ${recordData.clientId}, Campaign: ${recordData.campId}`);
+    console.log(`   Hangup record updated: ${recordingUpdateResult.modifiedCount > 0 ? '✅ Success' : '⚠️ Not found'}`);
+    
+    res.status(200).type('application/xml').send('<?xml version="1.0" encoding="UTF-8"?><Response></Response>');
     
   } catch (error) {
     console.error('❌ Error processing Twilio recording callback:', error);
-    res.status(500).json({ error: 'Internal server error' });
+    res.status(500).type('application/xml').send('<?xml version="1.0" encoding="UTF-8"?><Response></Response>');
   }
 });
 
@@ -461,11 +507,11 @@ router.post('/record-status', async (req, res) => {
     // Log for debugging but don't need to store additional data
     // Recording callback already handles the main recording storage
     
-    res.status(200).json({ message: 'Recording status processed' });
+    res.status(200).type('application/xml').send('<?xml version="1.0" encoding="UTF-8"?><Response></Response>');
     
   } catch (error) {
     console.error('❌ Error processing Twilio recording status:', error);
-    res.status(500).json({ error: 'Internal server error' });
+    res.status(500).type('application/xml').send('<?xml version="1.0" encoding="UTF-8"?><Response></Response>');
   }
 });
 
