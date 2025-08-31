@@ -155,20 +155,30 @@ async function warmupMultiplePods(warmupUrl, numPods = 1) {
     return { success: true, successCount: 0, totalPods: 0, results: [], duration: 0 };
   }
 
-  // Convert relative URL to absolute URL if needed
-  let fullWarmupUrl = warmupUrl;
+  // Convert warmup URL to bulk warmup endpoint
+  let bulkWarmupUrl = warmupUrl;
   if (warmupUrl.startsWith('/')) {
     const baseUrl = process.env.BASE_URL || `http://localhost:${process.env.PORT || 7999}`;
-    fullWarmupUrl = `${baseUrl}${warmupUrl}`;
-    console.log(`🔗 Converting relative warmup URL to: ${fullWarmupUrl}`);
+    bulkWarmupUrl = `${baseUrl}${warmupUrl}`;
+    console.log(`🔗 Converting relative warmup URL to: ${bulkWarmupUrl}`);
+  }
+  
+  // Replace /warmup with /warmupBulk for bulk operations
+  if (bulkWarmupUrl.endsWith('/warmup')) {
+    bulkWarmupUrl = bulkWarmupUrl.replace('/warmup', '/warmupBulk');
+  } else if (!bulkWarmupUrl.includes('/warmupBulk')) {
+    // If URL doesn't end with /warmup, append /warmupBulk
+    const url = new URL(bulkWarmupUrl);
+    url.pathname = url.pathname.replace(/\/$/, '') + '/warmupBulk';
+    bulkWarmupUrl = url.toString();
   }
 
-  console.log(`🤖 Starting parallel warmup for ${numPods} pods...`);
+  console.log(`🤖 Starting bulk warmup for ${numPods} pods using: ${bulkWarmupUrl}`);
   const startTime = Date.now();
 
-  // Create array of warmup promises
+  // Create array of warmup promises - still use individual requests to hit different pods
   const warmupPromises = Array.from({ length: numPods }, (_, index) => 
-    warmupBotWithRetry(fullWarmupUrl).then(result => ({
+    warmupBotWithRetry(bulkWarmupUrl).then(result => ({
       podIndex: index + 1,
       ...result
     }))
