@@ -659,15 +659,8 @@ async function getMergedLogData(campId, cursor = null, limit = 100, isDownload =
           const searchValue = customFilter.value;
           const operator = customFilter.operator || 'contains'; // default to contains
           
-          // Handle nested field notation - insert dot after lead_analysis prefix
-          if (fieldName.startsWith('lead_analysis_')) {
-            fieldName = fieldName.replace('lead_analysis_', 'lead_analysis.');
-            console.log(`🔧 Filter ${index}: Converted field name: ${customFilter.field} -> ${fieldName}`);
-          } else if (fieldName.includes('_')) {
-            // For other cases like "leadAnalysis_is_lead" -> "leadAnalysis.is_lead"
-            fieldName = fieldName.replace('_', '.');
-            console.log(`🔧 Filter ${index}: Converted field name: ${customFilter.field} -> ${fieldName}`);
-          }
+          // Use field name as-is - no conversion needed
+          console.log(`🔧 Filter ${index}: Using field name as-is: ${fieldName}`);
           
           let filterCondition = null;
           
@@ -753,15 +746,8 @@ async function getMergedLogData(campId, cursor = null, limit = 100, isDownload =
         const searchValue = filters.custom.value;
         const operator = filters.custom.operator || 'contains'; // default to contains
         
-        // Handle nested field notation - insert dot after lead_analysis prefix
-        if (fieldName.startsWith('lead_analysis_')) {
-          fieldName = fieldName.replace('lead_analysis_', 'lead_analysis.');
-          console.log(`🔧 Converted field name: ${filters.custom.field} -> ${fieldName}`);
-        } else if (fieldName.includes('_')) {
-          // For other cases like "leadAnalysis_is_lead" -> "leadAnalysis.is_lead"
-          fieldName = fieldName.replace('_', '.');
-          console.log(`🔧 Converted field name: ${filters.custom.field} -> ${fieldName}`);
-        }
+        // Use field name as-is - no conversion needed
+        console.log(`🔧 Legacy filter: Using field name as-is: ${fieldName}`);
         
         if (operator === 'contains') {
           // Simple string search with case insensitive regex - no boolean logic
