@@ -440,7 +440,7 @@ async function saveHangupData(hangupData) {
 //     console.log(`Call ended, Active calls: ${activeCalls.activeCalls.count}`);
 // }
 
-async function getReportByCampId(campId) {
+async function getReportByCampId(campId, cursor = null, limit = 100, isDownload = false, filters = null) {
   const campData = await getSingleCampaignDetails(campId)
   
   if(campData.length == 0){
@@ -456,11 +456,14 @@ async function getReportByCampId(campId) {
   const campaignName = campData[0].campaignName
   const isBalanceUpdated = campData[0].isBalanceUpdated
   
+  // Get the actual total contacts scheduled for this campaign
+  const totalScheduledCalls = campData[0].totalContacts || 0
+  
   // Get actual campaign status from database
   const campaignStatus = campData[0].status || 'running'
   
-  // Always try to get partial results, even if campaign is not completed
-  const reportData = await getMergedLogData(campId)
+  // Always try to get partial results with pagination and filtering, even if campaign is not completed
+  const reportData = await getMergedLogData(campId, cursor, limit, isDownload, filters)
   
   // Calculate campaign duration
   let campDuration = reportData.totalDuration
@@ -490,7 +493,8 @@ async function getReportByCampId(campId) {
       ...reportData,
       campaignStatus: campaignStatus,
       completedCalls: hangupDataCount,
-      totalScheduledCalls: connectedCall,
+      totalScheduledCalls: totalScheduledCalls,
+      successfulConnections: connectedCall,
       failedCalls: failedCall
     }
   }
@@ -504,7 +508,8 @@ async function getReportByCampId(campId) {
       message: "Campaign in progress - no completed calls yet",
       campaignStatus: campaignStatus,
       completedCalls: hangupDataCount,
-      totalScheduledCalls: connectedCall,
+      totalScheduledCalls: totalScheduledCalls,
+      successfulConnections: connectedCall,
       failedCalls: failedCall
     }
   }
@@ -591,7 +596,7 @@ async function getHangupDataCountByCampaignId(campId) {
 //   }
 // }
 
-async function getMergedLogData(campId) {
+async function getMergedLogData(campId, cursor = null, limit = 100, isDownload = false, filters = null) {
   try {
     await connectToMongo(); // Ensure MongoDB connection
 
@@ -600,20 +605,275 @@ async function getMergedLogData(campId) {
     const logCollection = database.collection("logData");
     const recordCollection = database.collection("plivoRecordData");
 
-    // Fetch all hangup data based on campId
-    const hangupDataDocs = await hangupCollection.find({ campId }).toArray();
+    // Build query with cursor for pagination and filtering
+    const query = { campId };
+    
+    // Apply filters if provided
+    if (filters) {
+      console.log(`🔍 Applying filters to campaign ${campId}:`, filters);
+      
+      // Duration filtering - convert Duration field to integer for comparison
+      if (filters.duration) {
+        const durationQuery = {};
+        
+        if (filters.duration.min !== undefined) {
+          durationQuery.$gte = parseInt(filters.duration.min);
+        }
+        
+        if (filters.duration.max !== undefined) {
+          durationQuery.$lte = parseInt(filters.duration.max);
+        }
+        
+        if (filters.duration.equals !== undefined) {
+          durationQuery.$eq = parseInt(filters.duration.equals);
+        }
+        
+        if (Object.keys(durationQuery).length > 0) {
+          // Convert Duration string to integer for comparison
+          query.$expr = {
+            $and: [
+              ...(query.$expr?.$and || []),
+              ...Object.entries(durationQuery).map(([operator, value]) => ({
+                [operator]: [{ $toInt: { $ifNull: ["$Duration", "0"] } }, value]
+              }))
+            ]
+          };
+          console.log(`⏱️ Duration filter applied:`, durationQuery);
+        }
+      }
+      
+      // Multiple custom filters support (array of custom filters)
+      if (filters.customFilters && Array.isArray(filters.customFilters)) {
+        console.log(`🔧 Processing ${filters.customFilters.length} custom filters`);
+        
+        // Collect all custom filter conditions
+        const customFilterConditions = [];
+        
+        filters.customFilters.forEach((customFilter, index) => {
+          if (!customFilter.field || !customFilter.value) {
+            console.warn(`⚠️ Skipping invalid custom filter ${index}: missing field or value`);
+            return;
+          }
+          
+          let fieldName = customFilter.field;
+          const searchValue = customFilter.value;
+          const operator = customFilter.operator || 'contains'; // default to contains
+          
+          // Handle nested field notation - insert dot after lead_analysis prefix
+          if (fieldName.startsWith('lead_analysis_')) {
+            fieldName = fieldName.replace('lead_analysis_', 'lead_analysis.');
+            console.log(`🔧 Filter ${index}: Converted field name: ${customFilter.field} -> ${fieldName}`);
+          } else if (fieldName.includes('_')) {
+            // For other cases like "leadAnalysis_is_lead" -> "leadAnalysis.is_lead"
+            fieldName = fieldName.replace('_', '.');
+            console.log(`🔧 Filter ${index}: Converted field name: ${customFilter.field} -> ${fieldName}`);
+          }
+          
+          let filterCondition = null;
+          
+          if (operator === 'contains') {
+            // Simple string search with case insensitive regex - no boolean logic
+            filterCondition = {
+              [fieldName]: { 
+                $regex: searchValue, 
+                $options: 'i' // case insensitive
+              }
+            };
+            console.log(`🔧 Filter ${index}: ${fieldName} contains "${searchValue}" (case insensitive)`);
+          } else if (operator === 'not_contains') {
+            // Simple string negation with case insensitive regex
+            filterCondition = {
+              [fieldName]: { 
+                $not: { 
+                  $regex: searchValue, 
+                  $options: 'i' 
+                }
+              }
+            };
+            console.log(`🔧 Filter ${index}: ${fieldName} does not contain "${searchValue}" (case insensitive)`);
+          } else if (operator === 'not_equals') {
+            // Exact value negation (case insensitive)
+            filterCondition = {
+              [fieldName]: { 
+                $not: { 
+                  $regex: `^${searchValue}$`, 
+                  $options: 'i' 
+                }
+              }
+            };
+            console.log(`🔧 Filter ${index}: ${fieldName} does not equal "${searchValue}" (case insensitive)`);
+          } else if (operator === 'equals') {
+            // Exact value match (case insensitive)
+            filterCondition = {
+              [fieldName]: { 
+                $regex: `^${searchValue}$`, 
+                $options: 'i' 
+              }
+            };
+            console.log(`🔧 Filter ${index}: ${fieldName} equals "${searchValue}" (case insensitive)`);
+          }
+          
+          if (filterCondition) {
+            customFilterConditions.push(filterCondition);
+          }
+        });
+        
+        // Apply all custom filters using $and
+        if (customFilterConditions.length > 0) {
+          // Ensure we have a proper $and array structure
+          if (!query.$and) {
+            query.$and = [];
+          }
+          
+          // Add existing non-$and conditions to $and array
+          const existingConditions = Object.keys(query)
+            .filter(k => k !== '$and' && k !== '$expr')
+            .map(k => ({ [k]: query[k] }));
+          
+          if (existingConditions.length > 0) {
+            query.$and.push(...existingConditions);
+            // Remove the old conditions from the main query
+            existingConditions.forEach(condition => {
+              Object.keys(condition).forEach(k => delete query[k]);
+            });
+          }
+          
+          // Add all custom filter conditions
+          query.$and.push(...customFilterConditions);
+          
+          console.log(`✅ Applied ${customFilterConditions.length} custom filters`);
+        }
+      }
+      
+      // Legacy single custom filter support (for backward compatibility)
+      else if (filters.custom && filters.custom.field && filters.custom.value) {
+        console.log(`🔧 Processing legacy single custom filter`);
+        
+        let fieldName = filters.custom.field;
+        const searchValue = filters.custom.value;
+        const operator = filters.custom.operator || 'contains'; // default to contains
+        
+        // Handle nested field notation - insert dot after lead_analysis prefix
+        if (fieldName.startsWith('lead_analysis_')) {
+          fieldName = fieldName.replace('lead_analysis_', 'lead_analysis.');
+          console.log(`🔧 Converted field name: ${filters.custom.field} -> ${fieldName}`);
+        } else if (fieldName.includes('_')) {
+          // For other cases like "leadAnalysis_is_lead" -> "leadAnalysis.is_lead"
+          fieldName = fieldName.replace('_', '.');
+          console.log(`🔧 Converted field name: ${filters.custom.field} -> ${fieldName}`);
+        }
+        
+        if (operator === 'contains') {
+          // Simple string search with case insensitive regex - no boolean logic
+          query[fieldName] = { 
+            $regex: searchValue, 
+            $options: 'i' // case insensitive
+          };
+          console.log(`🔧 Legacy custom filter applied - ${fieldName} contains "${searchValue}" (case insensitive)`);
+        } else if (operator === 'not_contains') {
+          // Simple string negation with case insensitive regex
+          query[fieldName] = { 
+            $not: { 
+              $regex: searchValue, 
+              $options: 'i' 
+            }
+          };
+          console.log(`🔧 Legacy custom filter applied - ${fieldName} does not contain "${searchValue}" (case insensitive)`);
+        } else if (operator === 'not_equals') {
+          // Exact value negation (case insensitive)
+          query[fieldName] = { 
+            $not: { 
+              $regex: `^${searchValue}$`, 
+              $options: 'i' 
+            }
+          };
+          console.log(`🔧 Legacy custom filter applied - ${fieldName} does not equal "${searchValue}" (case insensitive)`);
+        } else if (operator === 'equals') {
+          // Exact value match (case insensitive)
+          query[fieldName] = { 
+            $regex: `^${searchValue}$`, 
+            $options: 'i' 
+          };
+          console.log(`🔧 Legacy custom filter applied - ${fieldName} equals "${searchValue}" (case insensitive)`);
+        }
+      }
+    }
+    
+    // Get total count of matching records ONLY on first page (no cursor) or download mode
+    let totalCount = null;
+    let totalDuration = null;
+    if (!cursor || isDownload) {
+      const countQuery = { ...query };
+      totalCount = await hangupCollection.countDocuments(countQuery);
+      
+      // Calculate total duration from all records (needed for billing)
+      const allDurationDocs = await hangupCollection
+        .find(countQuery, { projection: { Duration: 1 } })
+        .toArray();
+      totalDuration = allDurationDocs.reduce((sum, doc) => sum + (parseInt(doc.Duration) || 0), 0);
+    }
+
+    if (cursor && !isDownload) {
+      // Cursor is the _id of the last item from previous page (only for pagination mode)
+      query._id = { $lt: new ObjectId(cursor) };
+    }
+
+    // For download mode, ignore pagination limits
+    const queryLimit = isDownload ? 0 : limit + 1; // 0 means no limit in MongoDB
+
+    // Fetch hangup data with pagination (sorted by _id desc for newest first)
+    let hangupQuery = hangupCollection
+      .find(query)
+      .sort({ _id: -1 });
+      
+    if (queryLimit > 0) {
+      hangupQuery = hangupQuery.limit(queryLimit);
+    }
+
+    const hangupDataDocs = await hangupQuery.toArray();
 
     if (hangupDataDocs.length === 0) {
-      return { status: 404, message: "No hangup data found for the given campId." };
+      return { 
+        status: 404, 
+        message: "No hangup data found for the given campId.",
+        data: [],
+        totalCount: totalCount || 0,
+        totalDuration: totalDuration || 0,
+        hasNextPage: false,
+        nextCursor: null,
+        pagination: {
+          currentPage: cursor ? 'N/A' : 1,
+          hasNextPage: false,
+          nextCursor: null,
+          totalRecords: totalCount || 0
+        },
+        isDownload
+      };
+    }
+
+    // For download mode, no pagination logic
+    let hasNextPage = false;
+    let nextCursor = null;
+    
+    if (!isDownload) {
+      // Check if there's a next page (only in pagination mode)
+      hasNextPage = hangupDataDocs.length > limit;
+      if (hasNextPage) {
+        hangupDataDocs.pop(); // Remove the extra item
+      }
+      
+      // Get the next cursor (last item's _id)
+      nextCursor = hasNextPage ? hangupDataDocs[hangupDataDocs.length - 1]._id.toString() : null;
     }
 
     // Extract unique CallUUIDs from hangupData
-    const callUUIDs = hangupDataDocs.map(doc =>{ return doc.CallUUID });
+    const callUUIDs = hangupDataDocs.map(doc => doc.CallUUID);
 
-    // Fetch all logData documents based on CallUUIDs
+    // Fetch logData documents based on CallUUIDs (for this page only)
     const logDataDocs = await logCollection.find({ callUUID: { $in: callUUIDs } }).toArray();
 
-    const totalConversationTime = hangupDataDocs.reduce((sum, doc) => sum + (parseInt(doc.Duration) || 0), 0);
+    // Calculate duration for this page
+    const pageDuration = hangupDataDocs.reduce((sum, doc) => sum + (parseInt(doc.Duration) || 0), 0);
 
     // Group log data by CallUUID and get the latest entry using ObjectId
     const latestLogDataMap = new Map();
@@ -624,7 +884,7 @@ async function getMergedLogData(campId) {
       }
     });
 
-    // Fetch corresponding records from plivoRecordData
+    // Fetch corresponding records from plivoRecordData (for this page only)
     const recordDataDocs = await recordCollection.find({ CallUUID: { $in: callUUIDs } }).toArray();
 
     // Convert recordDataDocs to a Map for fast lookup
@@ -644,8 +904,19 @@ async function getMergedLogData(campId) {
     return { 
       status: 200, 
       data: mergedData, 
-      totalDuration: totalConversationTime, 
-      message: "Merged data fetched successfully."
+      totalDuration: totalDuration !== null ? totalDuration : pageDuration, // Use total if available, otherwise page duration
+      message: "Merged data fetched successfully.",
+      totalCount: totalCount || hangupDataDocs.length,
+      hasNextPage: hasNextPage,
+      nextCursor: nextCursor,
+      pagination: {
+        currentPage: cursor ? 'N/A' : 1, // Page numbers not applicable with cursor pagination
+        hasNextPage: hasNextPage,
+        nextCursor: nextCursor,
+        totalRecords: totalCount || hangupDataDocs.length,
+        limit: isDownload ? 'All' : limit
+      },
+      isDownload: isDownload
     };
   } catch (error) {
     console.error("Error fetching merged log data:", error);

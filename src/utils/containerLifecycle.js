@@ -189,9 +189,9 @@ async function handleGracefulShutdown(signal) {
   }, CONTAINER_SHUTDOWN_GRACE);
   
   try {
-    // Pause all running campaigns managed by this container
-    const pauseResult = await pauseContainerCampaigns();
-    console.log(`⏸️  Paused ${pauseResult.paused} campaigns during shutdown`);
+    // Prepare all running campaigns for auto-recovery (keep running, clear heartbeat)
+    const prepareResult = await pauseContainerCampaigns();
+    console.log(`🔄 Prepared ${prepareResult.prepared} campaigns for auto-recovery during shutdown`);
     
     // Wait for active shutdown promises to complete
     if (activeShutdownPromises.length > 0) {
@@ -211,8 +211,8 @@ async function handleGracefulShutdown(signal) {
 }
 
 /**
- * Pause all campaigns currently managed by this container
- * @returns {Promise<{paused: number, errors: number}>}
+ * Prepare campaigns for auto-recovery by clearing heartbeat (keeps them running for orphan detection)
+ * @returns {Promise<{prepared: number, errors: number}>}
  */
 async function pauseContainerCampaigns() {
   try {
@@ -226,13 +226,13 @@ async function pauseContainerCampaigns() {
       containerId: CONTAINER_ID
     }).toArray();
     
-    console.log(`🔍 Found ${containerCampaigns.length} campaigns to pause during shutdown`);
+    console.log(`🔍 Found ${containerCampaigns.length} campaigns to prepare for auto-recovery during shutdown`);
     
     if (containerCampaigns.length === 0) {
-      return { paused: 0, errors: 0 };
+      return { prepared: 0, errors: 0 };
     }
     
-    // Pause all campaigns managed by this container
+    // Keep campaigns RUNNING but clear heartbeat so they become orphaned and auto-recover
     const result = await collection.updateMany(
       {
         status: "running",
@@ -240,22 +240,22 @@ async function pauseContainerCampaigns() {
       },
       {
         $set: {
-          status: "paused",
-          pausedAt: new Date(),
-          pausedBy: `container_shutdown_${CONTAINER_ID}`,
+          // Keep status as "running" for auto-recovery
           lastActivity: new Date(),
-          heartbeat: null // Stop heartbeat when paused
+          shutdownAt: new Date(),
+          shutdownBy: `container_shutdown_${CONTAINER_ID}`,
+          heartbeat: null // Clear heartbeat to trigger orphan detection
         }
       }
     );
     
-    console.log(`⏸️  Paused ${result.modifiedCount} campaigns during container shutdown`);
+    console.log(`🔄 Prepared ${result.modifiedCount} campaigns for auto-recovery (kept running, cleared heartbeat)`);
     
-    return { paused: result.modifiedCount, errors: 0 };
+    return { prepared: result.modifiedCount, errors: 0 };
     
   } catch (error) {
-    console.error('❌ Error pausing container campaigns:', error);
-    return { paused: 0, errors: 1, error: error.message };
+    console.error('❌ Error preparing container campaigns for auto-recovery:', error);
+    return { prepared: 0, errors: 1, error: error.message };
   }
 }
 

@@ -840,8 +840,8 @@ router.post('/retry-campaign', authenticateToken, validateResourceOwnership, aud
  * /plivo/get-report-by-campaign:
  *   post:
  *     tags: [Plivo]
- *     summary: Get campaign report with real-time progress
- *     description: Retrieve campaign report including completed calls and campaign status. Returns partial results even for ongoing campaigns.
+ *     summary: Get campaign report with cursor-based pagination
+ *     description: Retrieve campaign report including completed calls and campaign status with pagination support. Returns partial results even for ongoing campaigns. Use cursor-based pagination for large datasets.
  *     security:
  *       - BearerAuth: []
  *     requestBody:
@@ -857,6 +857,76 @@ router.post('/retry-campaign', authenticateToken, validateResourceOwnership, aud
  *                 type: string
  *                 description: The ID of the campaign to get report for
  *                 example: "67fca247fe00d34aba08702e"
+ *               cursor:
+ *                 type: string
+ *                 description: Cursor for pagination (ObjectId from previous page's last record). Omit for first page.
+ *                 example: "64a1b2c3d4e5f6789abc0123"
+ *               limit:
+ *                 type: number
+ *                 description: Number of records per page (default 100, max 1000)
+ *                 example: 100
+ *                 minimum: 1
+ *                 maximum: 1000
+ *               isDownload:
+ *                 type: boolean
+ *                 description: Set to true to download all records (ignores pagination)
+ *                 example: false
+ *               filters:
+ *                 type: object
+ *                 description: Optional filters to apply to the data (supports multiple custom filters)
+ *                 properties:
+ *                   duration:
+ *                     type: object
+ *                     description: Filter by call duration (Duration field converted to integer)
+ *                     properties:
+ *                       min:
+ *                         type: number
+ *                         description: Minimum call duration in seconds
+ *                         example: 30
+ *                       max:
+ *                         type: number
+ *                         description: Maximum call duration in seconds
+ *                         example: 300
+ *                       equals:
+ *                         type: number
+ *                         description: Exact call duration in seconds
+ *                         example: 60
+ *                   customFilters:
+ *                     type: array
+ *                     description: Array of custom field filters (supports multiple filters)
+ *                     items:
+ *                       type: object
+ *                       properties:
+ *                         field:
+ *                           type: string
+ *                           description: Field name to filter on (supports nested fields with underscore notation)
+ *                           example: "leadAnalysis_is_lead"
+ *                         value:
+ *                           type: string
+ *                           description: String value to search for (supports boolean values like 'true'/'false')
+ *                           example: "true"
+ *                         operator:
+ *                           type: string
+ *                           enum: [contains, not_contains]
+ *                           description: String comparison operator
+ *                           example: "contains"
+ *                   custom:
+ *                     type: object
+ *                     description: Legacy single custom filter (deprecated - use customFilters instead)
+ *                     properties:
+ *                       field:
+ *                         type: string
+ *                         description: Field name to filter on
+ *                         example: "hangupFirstName"
+ *                       value:
+ *                         type: string
+ *                         description: String value to search for
+ *                         example: "john"
+ *                       operator:
+ *                         type: string
+ *                         enum: [contains, not_contains]
+ *                         description: String comparison operator
+ *                         example: "contains"
  *     responses:
  *       200:
  *         description: Campaign report retrieved successfully
@@ -876,14 +946,14 @@ router.post('/retry-campaign', authenticateToken, validateResourceOwnership, aud
  *                 totalDuration:
  *                   type: number
  *                   example: 1250
- *                   description: Total call duration in seconds
+ *                   description: Total call duration in seconds (total across all pages)
  *                 message:
  *                   type: string
  *                   example: "Merged data fetched successfully."
  *                 campaignStatus:
  *                   type: string
- *                   enum: [running, in_progress, completed]
- *                   example: "in_progress"
+ *                   enum: [running, paused, completed, cancelled, failed]
+ *                   example: "running"
  *                   description: Current status of the campaign
  *                 isCompleted:
  *                   type: boolean
@@ -901,6 +971,44 @@ router.post('/retry-campaign', authenticateToken, validateResourceOwnership, aud
  *                   type: number
  *                   example: 5
  *                   description: Number of failed calls
+ *                 totalCount:
+ *                   type: number
+ *                   example: 150
+ *                   description: Total number of records across all pages
+ *                 hasNextPage:
+ *                   type: boolean
+ *                   example: true
+ *                   description: Whether there are more pages available
+ *                 nextCursor:
+ *                   type: string
+ *                   example: "64a1b2c3d4e5f6789abc0124"
+ *                   description: Cursor for next page (null if no more pages)
+ *                 pagination:
+ *                   type: object
+ *                   properties:
+ *                     currentPage:
+ *                       type: string
+ *                       example: "N/A"
+ *                       description: Page numbers not applicable with cursor pagination
+ *                     hasNextPage:
+ *                       type: boolean
+ *                       example: true
+ *                     nextCursor:
+ *                       type: string
+ *                       example: "64a1b2c3d4e5f6789abc0124"
+ *                     totalRecords:
+ *                       type: number
+ *                       example: 150
+ *                     limit:
+ *                       oneOf:
+ *                         - type: number
+ *                         - type: string
+ *                       example: 100
+ *                       description: Records per page or 'All' for download mode
+ *                 isDownload:
+ *                   type: boolean
+ *                   example: false
+ *                   description: Whether this was a download request
  *       404:
  *         description: Campaign not found
  *       401:
@@ -913,19 +1021,25 @@ router.post('/retry-campaign', authenticateToken, validateResourceOwnership, aud
 router.post('/get-report-by-campaign', authenticateToken, validateResourceOwnership, validationSchemas.reportQuery, auditLog, async(req, res) =>{
   try{
     const camp_id = req.body.campaignId;
-    // const camp_id = "67fca247fe00d34aba08702e"
-    const result = await getReportByCampId(camp_id)
+    const cursor = req.body.cursor || null; // For pagination
+    const limit = parseInt(req.body.limit) || 100; // Default 100 records per page
+    const isDownload = req.body.isDownload === true || req.body.isDownload === 'true'; // For full download
+    const filters = req.body.filters || null; // For filtering
+    
+    console.log(`📊 Campaign report request: ${camp_id}, cursor: ${cursor}, limit: ${limit}, download: ${isDownload}, filters:`, filters);
+    
+    const result = await getReportByCampId(camp_id, cursor, limit, isDownload, filters)
     
     // Handle 404 for campaign not found
     if(result.status == 404){
       return res.status(404).send({ message: result.message });
     }
     
-    // For backward compatibility, send the entire result object
-    // The frontend can access result.data for call data and result.campaignStatus for status
+    // Enhanced response with pagination metadata
     res.status(result.status || 200).send(result)
   } catch(error){
-    res.status(500).send({ message: "Internal Server Error", error });
+    console.error('❌ Error in get-report-by-campaign:', error);
+    res.status(500).send({ message: "Internal Server Error", error: error.message });
   }
 })
 
