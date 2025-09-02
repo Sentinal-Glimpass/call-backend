@@ -88,7 +88,7 @@ async function checkGlobalConcurrency() {
 }
 
 /**
- * Wait for available concurrency slot
+ * Wait for available concurrency slot (legacy - short timeout)
  * @param {string} clientId - Client ObjectId
  * @returns {Promise<{success: boolean, waitTime: number, error?: string}>}
  */
@@ -140,6 +140,26 @@ async function waitForAvailableSlot(clientId) {
     waitTime: maxWaitTime,
     error: 'Timeout waiting for available slot'
   };
+}
+
+/**
+ * Wait for concurrency slot - try 1000 times then give up
+ */
+async function waitForSlot(clientId) {
+  for (let i = 0; i < 1000; i++) {
+    const [clientCheck, globalCheck] = await Promise.all([
+      checkClientConcurrency(clientId),
+      checkGlobalConcurrency()
+    ]);
+    
+    if (clientCheck.allowed && globalCheck.allowed) {
+      return true;
+    }
+    
+    await new Promise(resolve => setTimeout(resolve, 2000));
+  }
+  
+  return false; // Failed after 1000 attempts
 }
 
 /**
@@ -456,19 +476,17 @@ async function processSingleCall(callParams) {
     // Step 0: Lazy cleanup of stuck calls
     await lazyCleanupStuckCalls();
     
-    // Step 1: Check and wait for concurrency slot
-    console.log('🔍 Checking concurrency limits...');
-    const slotResult = await waitForAvailableSlot(clientId);
-    if (!slotResult.success) {
+    // Step 1: Wait for concurrency slot
+    const hasSlot = await waitForSlot(clientId);
+    if (!hasSlot) {
       return {
         success: false,
-        error: slotResult.error,
-        stage: 'concurrency_check',
-        waitTime: slotResult.waitTime
+        error: 'System overloaded - no slots available',
+        shouldPauseCampaign: true
       };
     }
     
-    console.log(`✅ Slot available after ${slotResult.waitTime}ms wait`);
+    console.log('✅ Concurrency slot available');
     
     // Step 2: Bot warmup with retry logic
     let warmupResult = { success: true, attempts: 0, duration: 0 };
@@ -922,6 +940,7 @@ module.exports = {
   checkClientConcurrency,
   checkGlobalConcurrency,
   waitForAvailableSlot,
+  waitForSlot,
   trackCallStart,
   updateCallUUID,
   trackCallEnd,

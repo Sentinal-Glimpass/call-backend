@@ -1432,20 +1432,25 @@ async function processEnhancedCampaign(campaignId, listData, fromNumber, wssUrl,
       if (callResult.success) {
         connectedCall++;
         console.log(`✅ Call ${i + 1}/${listData.length}: ${contact.number} (${callResult.callUUID})`);
+        
+        // Update campaign position after successful processing
+        await updateCampaignProgress(campaignId, i + 1);
       } else {
-        failedCall++;
-        console.error(`❌ Call ${i + 1}/${listData.length}: ${contact.number} - ${callResult.error}`);
+        // Check if system is overloaded and campaign should be paused
+        if (callResult.shouldPauseCampaign) {
+          console.log(`⏸️ System overloaded - pausing campaign: ${campaignId}`);
+          await pauseCampaign(campaignId);
+          break;
+        } else {
+          failedCall++;
+          console.error(`❌ Call ${i + 1}/${listData.length}: ${contact.number} - ${callResult.error}`);
+          await updateCampaignProgress(campaignId, i + 1);
+        }
       }
       
-      // Update campaign position after processing this contact
-      await updateCampaignProgress(campaignId, i + 1);
-      
       callsInLastMinute++;
-      
-      // Update processed count and last activity  
       await updateCampaignActivity(campaignId, connectedCall + failedCall);
       
-      // Wait between calls
       const subsequentWait = parseInt(process.env.SUBSEQUENT_CALL_WAIT) || 6000;
       await new Promise(resolve => setTimeout(resolve, subsequentWait));
     }
