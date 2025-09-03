@@ -1451,7 +1451,7 @@ async function processEnhancedCampaign(campaignId, listData, fromNumber, wssUrl,
       callsInLastMinute++;
       await updateCampaignActivity(campaignId, connectedCall + failedCall);
       
-      const subsequentWait = parseInt(process.env.SUBSEQUENT_CALL_WAIT) || 6000;
+      const subsequentWait = parseInt(process.env.SUBSEQUENT_CALL_WAIT) || 1000;
       await new Promise(resolve => setTimeout(resolve, subsequentWait));
     }
     
