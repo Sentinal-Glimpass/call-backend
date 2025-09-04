@@ -52,7 +52,27 @@ async function createPerformanceIndexes() {
       { background: true, name: "idx_logdata_campId" }
     );
     
-    // 5. Index for client collection (authentication) - skip unique constraints if duplicates exist
+    // 5. Critical indexes for getMergedLogData performance (fixes timeout issues)
+    console.log('Creating index on logData.callUUID...');
+    await database.collection("logData").createIndex(
+      { callUUID: 1 },
+      { background: true, name: "idx_logdata_callUUID" }
+    );
+    
+    console.log('Creating index on plivoRecordData.CallUUID...');
+    await database.collection("plivoRecordData").createIndex(
+      { CallUUID: 1 },
+      { background: true, name: "idx_recorddata_callUUID" }
+    );
+    
+    // Compound index for campaign report pagination (critical for large campaigns)
+    console.log('Creating compound index on plivoHangupData for pagination...');
+    await database.collection("plivoHangupData").createIndex(
+      { campId: 1, _id: -1 },
+      { background: true, name: "idx_campId_id_desc" }
+    );
+    
+    // 6. Index for client collection (authentication) - skip unique constraints if duplicates exist
     try {
       console.log('Creating index on client.email...');
       await database.collection("client").createIndex(
@@ -90,7 +110,7 @@ async function createPerformanceIndexes() {
     
     // List all indexes for verification
     console.log('\n📋 Created indexes:');
-    const collections = ['plivo-list', 'plivo-list-content', 'plivoHangupData', 'logData', 'client', 'campaign'];
+    const collections = ['plivo-list', 'plivo-list-content', 'plivoHangupData', 'logData', 'plivoRecordData', 'client', 'campaign'];
     
     for (const collectionName of collections) {
       try {

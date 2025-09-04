@@ -790,13 +790,32 @@ async function getMergedLogData(campId, cursor = null, limit = 100, isDownload =
     let totalDuration = null;
     if (!cursor || isDownload) {
       const countQuery = { ...query };
-      totalCount = await hangupCollection.countDocuments(countQuery);
       
-      // Calculate total duration from all records (needed for billing)
-      const allDurationDocs = await hangupCollection
-        .find(countQuery, { projection: { Duration: 1 } })
-        .toArray();
-      totalDuration = allDurationDocs.reduce((sum, doc) => sum + (parseInt(doc.Duration) || 0), 0);
+      // Use aggregation pipeline for better performance
+      const aggregationPipeline = [
+        { $match: countQuery },
+        {
+          $group: {
+            _id: null,
+            totalCount: { $sum: 1 },
+            totalDuration: { 
+              $sum: { 
+                $toInt: { $ifNull: ["$Duration", "0"] } 
+              } 
+            }
+          }
+        }
+      ];
+      
+      const aggregationResult = await hangupCollection.aggregate(aggregationPipeline).toArray();
+      
+      if (aggregationResult.length > 0) {
+        totalCount = aggregationResult[0].totalCount;
+        totalDuration = aggregationResult[0].totalDuration;
+      } else {
+        totalCount = 0;
+        totalDuration = 0;
+      }
     }
 
     if (cursor && !isDownload) {
