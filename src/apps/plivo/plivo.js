@@ -473,19 +473,16 @@ async function getReportByCampId(campId, cursor = null, limit = 100, isDownload 
     campDuration = 0
   }
   
-  // UPDATED: Campaign-level aggregate billing for ALL final states
-  // Individual campaign calls are NOT billed during hangup - only when campaign ends
-  // This ensures EVERY campaign gets exactly ONE billing entry regardless of outcome
-  const finalCampaignStates = ['completed', 'cancelled', 'failed'];
-  if(finalCampaignStates.includes(campaignStatus) && !isBalanceUpdated){
-    try {
-      await processCampaignAggregatedBilling(campId, campaignName, reportData, clientId, campaignStatus);
-      updateCampaignBalanceStatus(campId, true);
-      console.log(`✅ Campaign ${campaignName} (${campaignStatus}) - aggregate billing processed`);
-    } catch (error) {
-      console.error(`❌ Error processing campaign aggregate billing for ${campId} (${campaignStatus}):`, error);
-    }
-  }
+  // PERFORMANCE FIX: Don't run billing calculations on report views
+  // Billing should only happen during campaign state transitions, not report generation
+  // This was causing 10+ second delays on every report request
+  console.log(`📋 Campaign ${campaignName} status: ${campaignStatus}, billing updated: ${isBalanceUpdated}`);
+  
+  // Skip billing processing during report views - this should be handled by campaign lifecycle events
+  // const finalCampaignStates = ['completed', 'cancelled', 'failed'];
+  // if(finalCampaignStates.includes(campaignStatus) && !isBalanceUpdated){
+  //   // Billing is now handled elsewhere to avoid report view delays
+  // }
   
   // Add campaign status to the response
   if (reportData.status === 200) {
@@ -785,36 +782,69 @@ async function getMergedLogData(campId, cursor = null, limit = 100, isDownload =
       }
     }
     
-    // Get total count of matching records ONLY on first page (no cursor) or download mode
+    // PERFORMANCE OPTIMIZATION: Skip expensive count/duration aggregation for large datasets
+    // Only calculate totals for first page AND when dataset is reasonably small
     let totalCount = null;
     let totalDuration = null;
-    if (!cursor || isDownload) {
+    
+    // Skip total calculations for cursor-based pagination (except download mode)
+    if ((!cursor || isDownload) && !filters?.skipTotals) {
       const countQuery = { ...query };
       
-      // Use aggregation pipeline for better performance
-      const aggregationPipeline = [
-        { $match: countQuery },
-        {
-          $group: {
-            _id: null,
-            totalCount: { $sum: 1 },
-            totalDuration: { 
-              $sum: { 
-                $toInt: { $ifNull: ["$Duration", "0"] } 
-              } 
+      try {
+        // Use a faster estimate for very large datasets
+        const estimatedCount = await hangupCollection.estimatedDocumentCount();
+        
+        // If the entire collection is huge (>100k), skip expensive aggregation 
+        // unless this is a download request or explicit filter request
+        if (estimatedCount > 100000 && !isDownload && (!filters || Object.keys(filters).length === 0)) {
+          console.log(`⚡ Skipping expensive aggregation for large dataset (estimated: ${estimatedCount} docs)`);
+          totalCount = null; // Will be calculated on client-side or estimated
+          totalDuration = null;
+        } else {
+          // Use aggregation pipeline with performance optimizations
+          const aggregationPipeline = [
+            { $match: countQuery },
+            {
+              $group: {
+                _id: null,
+                totalCount: { $sum: 1 },
+                totalDuration: { 
+                  $sum: { 
+                    $convert: { 
+                      input: "$Duration", 
+                      to: "int", 
+                      onError: 0, 
+                      onNull: 0 
+                    } 
+                  } 
+                }
+              }
             }
+          ];
+          
+          // Add timeout and hint for better performance
+          const aggregationOptions = { 
+            maxTimeMS: 5000, // 5 second timeout
+            allowDiskUse: true 
+          };
+          
+          const aggregationResult = await hangupCollection
+            .aggregate(aggregationPipeline, aggregationOptions)
+            .toArray();
+          
+          if (aggregationResult.length > 0) {
+            totalCount = aggregationResult[0].totalCount;
+            totalDuration = aggregationResult[0].totalDuration;
+          } else {
+            totalCount = 0;
+            totalDuration = 0;
           }
         }
-      ];
-      
-      const aggregationResult = await hangupCollection.aggregate(aggregationPipeline).toArray();
-      
-      if (aggregationResult.length > 0) {
-        totalCount = aggregationResult[0].totalCount;
-        totalDuration = aggregationResult[0].totalDuration;
-      } else {
-        totalCount = 0;
-        totalDuration = 0;
+      } catch (aggregationError) {
+        console.warn(`⚠️ Aggregation timeout or error, falling back to page-based calculation:`, aggregationError.message);
+        totalCount = null;
+        totalDuration = null;
       }
     }
 
@@ -826,14 +856,22 @@ async function getMergedLogData(campId, cursor = null, limit = 100, isDownload =
     // For download mode, ignore pagination limits
     const queryLimit = isDownload ? 0 : limit + 1; // 0 means no limit in MongoDB
 
-    // Fetch hangup data with pagination (sorted by _id desc for newest first)
+    // PERFORMANCE OPTIMIZATION: Fetch hangup data with better query planning
     let hangupQuery = hangupCollection
       .find(query)
       .sort({ _id: -1 });
       
+    // Add query hints to use the right index
+    if (Object.keys(query).length > 1) {
+      hangupQuery = hangupQuery.hint({ campId: 1, _id: -1 });
+    }
+      
     if (queryLimit > 0) {
       hangupQuery = hangupQuery.limit(queryLimit);
     }
+
+    // Add timeout to prevent long-running queries
+    hangupQuery = hangupQuery.maxTimeMS(25000); // 25 second timeout
 
     const hangupDataDocs = await hangupQuery.toArray();
 
@@ -874,8 +912,25 @@ async function getMergedLogData(campId, cursor = null, limit = 100, isDownload =
     // Extract unique CallUUIDs from hangupData
     const callUUIDs = hangupDataDocs.map(doc => doc.CallUUID);
 
-    // Fetch logData documents based on CallUUIDs (for this page only)
-    const logDataDocs = await logCollection.find({ callUUID: { $in: callUUIDs } }).toArray();
+    // PERFORMANCE OPTIMIZATION: Parallel fetch of related data with timeouts
+    const [logDataDocs, recordDataDocs] = await Promise.allSettled([
+      logCollection
+        .find({ callUUID: { $in: callUUIDs } })
+        .maxTimeMS(10000) // 10 second timeout
+        .toArray(),
+      recordCollection
+        .find({ CallUUID: { $in: callUUIDs } })
+        .maxTimeMS(5000) // 5 second timeout
+        .toArray()
+    ]).then(results => [
+      results[0].status === 'fulfilled' ? results[0].value : [],
+      results[1].status === 'fulfilled' ? results[1].value : []
+    ]);
+
+    // Handle failed queries gracefully
+    if (logDataDocs.length === 0) {
+      console.warn(`⚠️ No logData found for ${callUUIDs.length} CallUUIDs in campaign ${campId}`);
+    }
 
     // Calculate duration for this page
     const pageDuration = hangupDataDocs.reduce((sum, doc) => sum + (parseInt(doc.Duration) || 0), 0);
@@ -888,9 +943,6 @@ async function getMergedLogData(campId, cursor = null, limit = 100, isDownload =
         latestLogDataMap.set(doc.callUUID, doc);
       }
     });
-
-    // Fetch corresponding records from plivoRecordData (for this page only)
-    const recordDataDocs = await recordCollection.find({ CallUUID: { $in: callUUIDs } }).toArray();
 
     // Convert recordDataDocs to a Map for fast lookup
     const recordMap = new Map(recordDataDocs.map(record => [record.CallUUID, record.RecordUrl]));
@@ -2554,6 +2606,302 @@ async function getTestCallReport(clientId) {
   }
 }
 
+// Campaign Analytics - Comprehensive metrics for individual campaigns
+async function getCampaignAnalytics(campaignId) {
+  try {
+    await connectToMongo();
+    const database = client.db("talkGlimpass");
+    
+    // Pipeline 1: Campaign basic stats from hangup data
+    const campaignStatsAggregation = [
+      { $match: { campId: campaignId } },
+      {
+        $group: {
+          _id: null,
+          totalCalls: { $sum: 1 },
+          totalDuration: { $sum: { $toInt: { $ifNull: ["$Duration", "0"] } } },
+          averageDuration: { $avg: { $toInt: { $ifNull: ["$Duration", "0"] } } },
+          callUUIDs: { $push: "$CallUUID" }
+        }
+      }
+    ];
+    
+    const campaignStats = await database.collection("plivoHangupData")
+      .aggregate(campaignStatsAggregation).toArray();
+    
+    if (campaignStats.length === 0) {
+      return { status: 404, message: "Campaign not found or no call data available" };
+    }
+    
+    const stats = campaignStats[0];
+    const callUUIDs = stats.callUUIDs;
+    
+    // Pipeline 2: Simplified lead analysis using basic field matching
+    const leadAnalysisAggregation = [
+      { $match: { callUUID: { $in: callUUIDs } } },
+      // Group by callUUID to get latest entry per call
+      {
+        $sort: { callUUID: 1, _id: -1 }
+      },
+      {
+        $group: {
+          _id: "$callUUID",
+          latestLog: { $first: "$$ROOT" }
+        }
+      },
+      // Simple lead detection - check for common lead field patterns
+      {
+        $addFields: {
+          isLead: {
+            $or: [
+              { $regexMatch: { input: { $ifNull: ["$latestLog.is_lead", ""] }, regex: "(true|maybe|1)", options: "i" } },
+              { $regexMatch: { input: { $ifNull: ["$latestLog.leadAnalysis_is_lead", ""] }, regex: "(true|maybe|1)", options: "i" } },
+              { $regexMatch: { input: { $ifNull: ["$latestLog.lead_status", ""] }, regex: "(true|maybe|1)", options: "i" } },
+              { $regexMatch: { input: { $ifNull: ["$latestLog.isLead", ""] }, regex: "(true|maybe|1)", options: "i" } }
+            ]
+          }
+        }
+      },
+      {
+        $group: {
+          _id: null,
+          totalLeads: { $sum: { $cond: ["$isLead", 1, 0] } }
+        }
+      }
+    ];
+    
+    const leadAnalysis = await database.collection("logData")
+      .aggregate(leadAnalysisAggregation).toArray();
+    
+    const totalLeads = leadAnalysis.length > 0 ? leadAnalysis[0].totalLeads : 0;
+    
+    // Pipeline 3: Cost analysis from billing history
+    const costAnalysisAggregation = [
+      { 
+        $match: { 
+          campaignId: campaignId,
+          transactionType: "Dr" // Debit entries only
+        } 
+      },
+      {
+        $group: {
+          _id: null,
+          totalCost: { $sum: { $abs: "$balanceCount" } } // Convert negative to positive
+        }
+      }
+    ];
+    
+    const costAnalysis = await database.collection("billingHistory")
+      .aggregate(costAnalysisAggregation).toArray();
+    
+    const totalCost = costAnalysis.length > 0 ? costAnalysis[0].totalCost : 0;
+    
+    // Calculate derived metrics
+    const averageDuration = Math.round(stats.averageDuration || 0);
+    const costPerLead = totalLeads > 0 ? Math.round((totalCost / totalLeads) * 100) / 100 : 0;
+    const costPerCall = stats.totalCalls > 0 ? Math.round((totalCost / stats.totalCalls) * 100) / 100 : 0;
+    
+    return {
+      status: 200,
+      data: {
+        campaignId: campaignId,
+        totalCalls: stats.totalCalls,
+        totalDuration: stats.totalDuration,
+        averageDuration: averageDuration,
+        totalCost: totalCost,
+        totalLeads: totalLeads,
+        costPerLead: costPerLead,
+        costPerCall: costPerCall,
+        leadConversionRate: stats.totalCalls > 0 ? Math.round((totalLeads / stats.totalCalls) * 10000) / 100 : 0 // Percentage with 2 decimals
+      }
+    };
+    
+  } catch (error) {
+    console.error("Error fetching campaign analytics:", error);
+    return { status: 500, message: "Internal server error", error: error.message };
+  }
+}
+
+// Client Analytics - Monthly expenditure and overall statistics
+async function getClientAnalytics(clientId, months = 12) {
+  try {
+    await connectToMongo();
+    const database = client.db("talkGlimpass");
+    
+    // Calculate date ranges for monthly analysis
+    const currentDate = new Date();
+    const startOfCurrentMonth = new Date(currentDate.getFullYear(), currentDate.getMonth(), 1);
+    const startOfLastMonth = new Date(currentDate.getFullYear(), currentDate.getMonth() - 1, 1);
+    const endOfLastMonth = new Date(currentDate.getFullYear(), currentDate.getMonth(), 0, 23, 59, 59);
+    const startOfAnalysisPeriod = new Date(currentDate.getFullYear(), currentDate.getMonth() - months + 1, 1);
+    
+    // Pipeline 1: Monthly expenditure breakdown
+    const monthlyExpenditureAggregation = [
+      {
+        $match: {
+          clientId: clientId,
+          transactionType: "Dr",
+          date: { $gte: startOfAnalysisPeriod }
+        }
+      },
+      {
+        $group: {
+          _id: {
+            year: { $year: "$date" },
+            month: { $month: "$date" }
+          },
+          totalExpenditure: { $sum: { $abs: "$balanceCount" } },
+          totalCalls: { $sum: 1 },
+          totalDuration: { $sum: "$callDuration" }
+        }
+      },
+      {
+        $addFields: {
+          monthName: {
+            $arrayElemAt: [
+              ["", "Jan", "Feb", "Mar", "Apr", "May", "Jun", 
+               "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"],
+              "$_id.month"
+            ]
+          }
+        }
+      },
+      {
+        $sort: { "_id.year": -1, "_id.month": -1 }
+      }
+    ];
+    
+    const monthlyData = await database.collection("billingHistory")
+      .aggregate(monthlyExpenditureAggregation).toArray();
+    
+    // Pipeline 2: Current month and last month summary 
+    const currentMonthAggregation = [
+      {
+        $match: {
+          clientId: clientId,
+          transactionType: "Dr",
+          date: { $gte: startOfCurrentMonth }
+        }
+      },
+      {
+        $group: {
+          _id: null,
+          currentMonthExpenditure: { $sum: { $abs: "$balanceCount" } },
+          currentMonthCalls: { $sum: 1 },
+          currentMonthDuration: { $sum: "$callDuration" }
+        }
+      }
+    ];
+    
+    const lastMonthAggregation = [
+      {
+        $match: {
+          clientId: clientId,
+          transactionType: "Dr",
+          date: { $gte: startOfLastMonth, $lte: endOfLastMonth }
+        }
+      },
+      {
+        $group: {
+          _id: null,
+          lastMonthExpenditure: { $sum: { $abs: "$balanceCount" } },
+          lastMonthCalls: { $sum: 1 },
+          lastMonthDuration: { $sum: "$callDuration" }
+        }
+      }
+    ];
+    
+    const [currentMonthData, lastMonthData] = await Promise.all([
+      database.collection("billingHistory").aggregate(currentMonthAggregation).toArray(),
+      database.collection("billingHistory").aggregate(lastMonthAggregation).toArray()
+    ]);
+    
+    // Pipeline 3: Overall client statistics
+    const overallStatsAggregation = [
+      {
+        $match: {
+          clientId: clientId,
+          transactionType: "Dr"
+        }
+      },
+      {
+        $group: {
+          _id: null,
+          totalLifetimeExpenditure: { $sum: { $abs: "$balanceCount" } },
+          totalLifetimeCalls: { $sum: 1 },
+          totalLifetimeDuration: { $sum: "$callDuration" },
+          averageCallCost: { $avg: { $abs: "$balanceCount" } },
+          firstTransactionDate: { $min: "$date" },
+          lastTransactionDate: { $max: "$date" }
+        }
+      }
+    ];
+    
+    const overallStats = await database.collection("billingHistory")
+      .aggregate(overallStatsAggregation).toArray();
+    
+    // Extract current month and last month data
+    const currentMonth = currentMonthData.length > 0 ? currentMonthData[0] : {
+      currentMonthExpenditure: 0, currentMonthCalls: 0, currentMonthDuration: 0
+    };
+    
+    const lastMonth = lastMonthData.length > 0 ? lastMonthData[0] : {
+      lastMonthExpenditure: 0, lastMonthCalls: 0, lastMonthDuration: 0
+    };
+    
+    const overall = overallStats.length > 0 ? overallStats[0] : {
+      totalLifetimeExpenditure: 0, totalLifetimeCalls: 0, totalLifetimeDuration: 0, 
+      averageCallCost: 0, firstTransactionDate: null, lastTransactionDate: null
+    };
+    
+    // Calculate month-over-month growth
+    const expenditureGrowth = lastMonth.lastMonthExpenditure > 0 ? 
+      Math.round(((currentMonth.currentMonthExpenditure - lastMonth.lastMonthExpenditure) / lastMonth.lastMonthExpenditure) * 10000) / 100 : 0;
+    
+    return {
+      status: 200,
+      data: {
+        clientId: clientId,
+        currentMonth: {
+          expenditure: Math.round(currentMonth.currentMonthExpenditure * 100) / 100,
+          calls: currentMonth.currentMonthCalls,
+          duration: currentMonth.currentMonthDuration
+        },
+        lastMonth: {
+          expenditure: Math.round(lastMonth.lastMonthExpenditure * 100) / 100,
+          calls: lastMonth.lastMonthCalls,
+          duration: lastMonth.lastMonthDuration
+        },
+        growth: {
+          expenditureGrowthPercent: expenditureGrowth,
+          callGrowthPercent: lastMonth.lastMonthCalls > 0 ? 
+            Math.round(((currentMonth.currentMonthCalls - lastMonth.lastMonthCalls) / lastMonth.lastMonthCalls) * 10000) / 100 : 0
+        },
+        lifetime: {
+          totalExpenditure: Math.round(overall.totalLifetimeExpenditure * 100) / 100,
+          totalCalls: overall.totalLifetimeCalls,
+          totalDuration: overall.totalLifetimeDuration,
+          averageCallCost: Math.round(overall.averageCallCost * 100) / 100,
+          firstTransactionDate: overall.firstTransactionDate,
+          lastTransactionDate: overall.lastTransactionDate
+        },
+        monthlyBreakdown: monthlyData.map(month => ({
+          year: month._id.year,
+          month: month._id.month,
+          monthName: month.monthName,
+          expenditure: Math.round(month.totalExpenditure * 100) / 100,
+          calls: month.totalCalls,
+          duration: month.totalDuration
+        }))
+      }
+    };
+    
+  } catch (error) {
+    console.error("Error fetching client analytics:", error);
+    return { status: 500, message: "Internal server error", error: error.message };
+  }
+}
+
   module.exports = {
     insertList,
     insertListContent,
@@ -2585,5 +2933,8 @@ async function getTestCallReport(clientId) {
     processEnhancedCampaign,
     // Balance validation functions
     validateClientBalance,
-    getCurrentClientBalance
+    getCurrentClientBalance,
+    // Analytics functions
+    getCampaignAnalytics,
+    getClientAnalytics
   }

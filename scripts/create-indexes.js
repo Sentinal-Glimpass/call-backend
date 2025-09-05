@@ -71,6 +71,49 @@ async function createPerformanceIndexes() {
       { campId: 1, _id: -1 },
       { background: true, name: "idx_campId_id_desc" }
     );
+
+    // CRITICAL FIX: Additional indexes for large campaign optimization
+    console.log('Creating compound index on plivoHangupData for filtered queries...');
+    await database.collection("plivoHangupData").createIndex(
+      { campId: 1, Duration: 1, _id: -1 },
+      { background: true, name: "idx_campId_duration_id" }
+    );
+
+    console.log('Creating sparse index on plivoHangupData for common filter fields...');
+    await database.collection("plivoHangupData").createIndex(
+      { "leadAnalysis_is_lead": 1 },
+      { background: true, sparse: true, name: "idx_lead_analysis" }
+    );
+    
+    await database.collection("plivoHangupData").createIndex(
+      { "hangupFirstName": 1 },
+      { background: true, sparse: true, name: "idx_hangup_firstname" }
+    );
+    
+    // Analytics indexes for billingHistory collection
+    console.log('Creating index on billingHistory.clientId...');
+    await database.collection("billingHistory").createIndex(
+      { clientId: 1 },
+      { background: true, name: "idx_billing_clientId" }
+    );
+    
+    console.log('Creating index on billingHistory.campaignId...');
+    await database.collection("billingHistory").createIndex(
+      { campaignId: 1 },
+      { background: true, name: "idx_billing_campaignId" }
+    );
+    
+    console.log('Creating compound index on billingHistory for monthly analytics...');
+    await database.collection("billingHistory").createIndex(
+      { clientId: 1, transactionType: 1, date: -1 },
+      { background: true, name: "idx_billing_client_type_date" }
+    );
+    
+    console.log('Creating compound index on billingHistory for campaign cost analysis...');
+    await database.collection("billingHistory").createIndex(
+      { campaignId: 1, transactionType: 1 },
+      { background: true, name: "idx_billing_campaign_type" }
+    );
     
     // 6. Index for client collection (authentication) - skip unique constraints if duplicates exist
     try {
@@ -110,7 +153,7 @@ async function createPerformanceIndexes() {
     
     // List all indexes for verification
     console.log('\n📋 Created indexes:');
-    const collections = ['plivo-list', 'plivo-list-content', 'plivoHangupData', 'logData', 'plivoRecordData', 'client', 'campaign'];
+    const collections = ['plivo-list', 'plivo-list-content', 'plivoHangupData', 'logData', 'plivoRecordData', 'billingHistory', 'client', 'campaign'];
     
     for (const collectionName of collections) {
       try {

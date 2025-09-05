@@ -52,7 +52,7 @@ const {
  *   name: Plivo
  *   description: Plivo SMS/voice operations and campaign management
  */
-const{ retryCampaign, getIncomingBilling,  updateIncomingClientBalance, getCampaignStatus, getContactsFromList, insertList, getIncomingReport, getContactfromListId, saveHangupData, insertListContent, updateList, getListByClientId, initiatePlivoCall, makeCallViaCampaign, getCampaignByClientId, saveRecordData, getReportByCampId, deleteList, cancelCampaign, pauseCampaign, resumeCampaign, getCampaignProgress, getTestCallReport, validateClientBalance, getCurrentClientBalance} = require('../apps/plivo/plivo');
+const{ retryCampaign, getIncomingBilling,  updateIncomingClientBalance, getCampaignStatus, getContactsFromList, insertList, getIncomingReport, getContactfromListId, saveHangupData, insertListContent, updateList, getListByClientId, initiatePlivoCall, makeCallViaCampaign, getCampaignByClientId, saveRecordData, getReportByCampId, deleteList, cancelCampaign, pauseCampaign, resumeCampaign, getCampaignProgress, getTestCallReport, validateClientBalance, getCurrentClientBalance, getCampaignAnalytics, getClientAnalytics} = require('../apps/plivo/plivo');
 
 // Validation schemas for Plivo endpoints
 const validationSchemas = {
@@ -3119,6 +3119,218 @@ router.post('/one-time-cleanup', authenticateToken, validateResourceOwnership, a
     
   } catch (error) {
     console.error("❌ Error in one-time cleanup endpoint:", error);
+    res.status(500).json({
+      success: false,
+      message: "Internal server error",
+      error: error.message
+    });
+  }
+});
+
+/**
+ * @swagger
+ * /plivo/campaign-analytics/{campaignId}:
+ *   get:
+ *     summary: Get comprehensive analytics for a specific campaign
+ *     tags: [Plivo]
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: campaignId
+ *         required: true
+ *         schema:
+ *           type: string
+ *         description: Campaign ID
+ *     responses:
+ *       200:
+ *         description: Campaign analytics retrieved successfully
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 status:
+ *                   type: integer
+ *                   example: 200
+ *                 data:
+ *                   type: object
+ *                   properties:
+ *                     campaignId:
+ *                       type: string
+ *                     totalCalls:
+ *                       type: integer
+ *                       description: Total number of calls made
+ *                     totalDuration:
+ *                       type: integer
+ *                       description: Total duration in seconds
+ *                     averageDuration:
+ *                       type: integer
+ *                       description: Average call duration in seconds
+ *                     totalCost:
+ *                       type: number
+ *                       description: Total campaign cost in credits
+ *                     totalLeads:
+ *                       type: integer
+ *                       description: Number of leads generated
+ *                     costPerLead:
+ *                       type: number
+ *                       description: Cost per lead in credits
+ *                     costPerCall:
+ *                       type: number
+ *                       description: Average cost per call in credits
+ *                     leadConversionRate:
+ *                       type: number
+ *                       description: Lead conversion rate as percentage
+ *       404:
+ *         description: Campaign not found
+ *       500:
+ *         description: Internal server error
+ */
+
+router.get('/campaign-analytics/:campaignId', authenticateToken, validateResourceOwnership, auditLog, async(req, res) => {
+  try {
+    const { campaignId } = req.params;
+    
+    console.log(`📊 Campaign analytics request for: ${campaignId}`); // Added analytics endpoint
+    
+    const result = await getCampaignAnalytics(campaignId);
+    
+    if (result.status === 404) {
+      return res.status(404).json({ 
+        success: false, 
+        message: result.message 
+      });
+    }
+    
+    res.status(200).json({
+      success: true,
+      ...result
+    });
+    
+  } catch (error) {
+    console.error("❌ Error in campaign-analytics endpoint:", error);
+    res.status(500).json({
+      success: false,
+      message: "Internal server error",
+      error: error.message
+    });
+  }
+});
+
+/**
+ * @swagger
+ * /plivo/client-analytics/{clientId}:
+ *   get:
+ *     summary: Get comprehensive analytics for a specific client
+ *     tags: [Plivo]
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: clientId
+ *         required: true
+ *         schema:
+ *           type: string
+ *         description: Client ID
+ *       - in: query
+ *         name: months
+ *         schema:
+ *           type: integer
+ *           default: 12
+ *         description: Number of months to include in analysis
+ *     responses:
+ *       200:
+ *         description: Client analytics retrieved successfully
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 status:
+ *                   type: integer
+ *                   example: 200
+ *                 data:
+ *                   type: object
+ *                   properties:
+ *                     clientId:
+ *                       type: string
+ *                     currentMonth:
+ *                       type: object
+ *                       properties:
+ *                         expenditure:
+ *                           type: number
+ *                         calls:
+ *                           type: integer
+ *                         duration:
+ *                           type: integer
+ *                     lastMonth:
+ *                       type: object
+ *                       properties:
+ *                         expenditure:
+ *                           type: number
+ *                         calls:
+ *                           type: integer
+ *                         duration:
+ *                           type: integer
+ *                     growth:
+ *                       type: object
+ *                       properties:
+ *                         expenditureGrowthPercent:
+ *                           type: number
+ *                         callGrowthPercent:
+ *                           type: number
+ *                     lifetime:
+ *                       type: object
+ *                       properties:
+ *                         totalExpenditure:
+ *                           type: number
+ *                         totalCalls:
+ *                           type: integer
+ *                         totalDuration:
+ *                           type: integer
+ *                         averageCallCost:
+ *                           type: number
+ *                         firstTransactionDate:
+ *                           type: string
+ *                         lastTransactionDate:
+ *                           type: string
+ *                     monthlyBreakdown:
+ *                       type: array
+ *                       items:
+ *                         type: object
+ *                         properties:
+ *                           year:
+ *                             type: integer
+ *                           month:
+ *                             type: integer
+ *                           monthName:
+ *                             type: string
+ *                           expenditure:
+ *                             type: number
+ *                           calls:
+ *                             type: integer
+ *                           duration:
+ *                             type: integer
+ *       500:
+ *         description: Internal server error
+ */
+router.get('/client-analytics/:clientId', authenticateToken, validateResourceOwnership, auditLog, async(req, res) => {
+  try {
+    const { clientId } = req.params;
+    const months = parseInt(req.query.months) || 12;
+    
+    console.log(`📊 Client analytics request for: ${clientId} (${months} months)`);
+    
+    const result = await getClientAnalytics(clientId, months);
+    
+    res.status(result.status || 200).json({
+      success: result.status !== 500,
+      ...result
+    });
+    
+  } catch (error) {
+    console.error("❌ Error in client-analytics endpoint:", error);
     res.status(500).json({
       success: false,
       message: "Internal server error",
