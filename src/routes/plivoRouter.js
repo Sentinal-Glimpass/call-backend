@@ -1867,10 +1867,9 @@ router.post('/hangup-url', async (req, res) => {
         let clientId = null;
         let existingClient = null;
 
-        // Try to resolve clientId, but don't fail if we can't find it
-        try {
-          if (callType === 'incoming') {
-            // For incoming calls, try to lookup by phone number (receiver)
+        // Resolve clientId - this is required for billing
+        if (callType === 'incoming') {
+            // For incoming calls, lookup by phone number (receiver) in BOTH incomingSet and callerNumbers
             const clientLookupNumber = hangupData.To;
             const possibleNumbers = [clientLookupNumber];
             if (clientLookupNumber.startsWith('91') && clientLookupNumber.length === 12) {
@@ -1885,102 +1884,103 @@ router.post('/hangup-url', async (req, res) => {
             const clientCollection = database.collection("client");
 
             console.log('🔍 Incoming call - looking up client using numbers:', possibleNumbers);
-            const foundClient = await clientCollection.findOne({callerNumbers: { $in: possibleNumbers }});
+
+            // Check both incomingSet (primary) and callerNumbers (fallback) fields
+            const foundClient = await clientCollection.findOne({
+              $or: [
+                { incomingSet: { $in: possibleNumbers } },
+                { callerNumbers: { $in: possibleNumbers } }
+              ]
+            });
 
             if (foundClient) {
               clientId = foundClient._id.toString();
               existingClient = foundClient;
-              console.log(`✅ Found client for incoming call: ${clientId}`);
+              console.log(`✅ Found client for incoming call: ${clientId} (matched via ${foundClient.incomingSet && possibleNumbers.includes(foundClient.incomingSet) ? 'incomingSet' : 'callerNumbers'})`);
             } else {
-              console.warn('⚠️ Client not found for incoming call:', possibleNumbers, '- will save hangup data without client association');
+              console.error('❌ Client not found for incoming call to:', possibleNumbers);
+              return res.status(400).json({
+                message: `No client configured for incoming number: ${clientLookupNumber}. Please configure this number in your account settings.`
+              });
             }
-          } else {
-            // For test calls and campaigns, tag contains assistantId - need to lookup client
-            const assistantId = hangupData.tag;
-            if (!assistantId) {
-              console.warn('⚠️ No assistantId found in tag for', callType, 'call - will save hangup data without client association');
-            } else {
-              // Step 1: Find client that owns this assistant
-              console.log(`🔍 Step 1: Looking up client for assistantId: ${assistantId}`);
-              const { connectToMongo, client: mongoClient } = require('../../models/mongodb.js');
-              await connectToMongo();
-              const database = mongoClient.db("talkGlimpass");
-              const assistantCollection = database.collection("assistant");
-              const { ObjectId } = require('mongodb');
-
-              const assistant = await assistantCollection.findOne({ _id: new ObjectId(assistantId) });
-              if (assistant && assistant.clientId) {
-                clientId = assistant.clientId;
-                console.log(`✅ Step 1: Found clientId ${clientId} for assistant ${assistantId}`);
-
-                // Get full client data
-                existingClient = await getClientByClientId(clientId);
-              } else {
-                console.warn('⚠️ Assistant not found or no clientId:', assistantId, '- will save hangup data without client association');
-              }
-            }
+        } else {
+          // For test calls and campaigns, tag contains assistantId - need to lookup client
+          const assistantId = hangupData.tag;
+          if (!assistantId) {
+            console.error('❌ No assistantId found in tag for', callType, 'call');
+            return res.status(400).json({ message: `No assistantId found in tag for ${callType} call` });
           }
-        } catch (clientLookupError) {
-          console.warn('⚠️ Error during client lookup:', clientLookupError.message, '- will save hangup data without client association');
+
+          // Step 1: Find client that owns this assistant
+          console.log(`🔍 Step 1: Looking up client for assistantId: ${assistantId}`);
+          const { connectToMongo, client: mongoClient } = require('../../models/mongodb.js');
+          await connectToMongo();
+          const database = mongoClient.db("talkGlimpass");
+          const assistantCollection = database.collection("assistant");
+          const { ObjectId } = require('mongodb');
+
+          const assistant = await assistantCollection.findOne({ _id: new ObjectId(assistantId) });
+          if (!assistant || !assistant.clientId) {
+            console.error('❌ Assistant not found or no clientId:', assistantId);
+            return res.status(400).json({ message: `Assistant not found: ${assistantId}` });
+          }
+
+          clientId = assistant.clientId;
+          console.log(`✅ Step 1: Found clientId ${clientId} for assistant ${assistantId}`);
+
+          // Get full client data
+          existingClient = await getClientByClientId(clientId);
+          if (!existingClient) {
+            console.error('❌ Client not found with ID:', clientId);
+            return res.status(400).json({ message: `Client not found: ${clientId}` });
+          }
         }
 
-        // Add resolved clientId to hangupData (may be null)
+        // Add resolved clientId to hangupData
         hangupData.clientId = clientId;
 
-        console.log(`🎯 Using clientId: ${clientId || 'null'} for ${callType} call`);
+        console.log(`🎯 Using clientId: ${clientId} for ${callType} call`);
 
         const duration = parseInt(hangupData.Duration) || 0;
         const creditsToDeduct = duration; // 1 second = 1 credit
+        const currentBalance = existingClient.availableBalance || 0;
+        const newBalance = currentBalance - creditsToDeduct;
 
-        // Only process billing if we have a valid client
-        if (clientId && existingClient) {
-          const currentBalance = existingClient.availableBalance || 0;
-          const newBalance = currentBalance - creditsToDeduct;
+        console.log(`💰 NEW Billing: ${callType} call - ${creditsToDeduct} credits (duration: ${duration}s)`);
+        console.log(`💰 Current Balance: ${currentBalance}`);
 
-          console.log(`💰 NEW Billing: ${callType} call - ${creditsToDeduct} credits (duration: ${duration}s)`);
-          console.log(`💰 Current Balance: ${currentBalance}`);
+        // UPDATED BILLING LOGIC: Balance updates for ALL calls, but billing history only for non-campaign calls
+        console.log(`💰 Processing call billing: ${currentBalance} -> ${newBalance}`);
 
-          // UPDATED BILLING LOGIC: Balance updates for ALL calls, but billing history only for non-campaign calls
-          console.log(`💰 Processing call billing: ${currentBalance} -> ${newBalance}`);
+        // Update client balance immediately for ALL call types (including campaign calls)
+        const { connectToMongo, client: mongoClient } = require('../../models/mongodb.js');
+        await connectToMongo();
+        const database = mongoClient.db("talkGlimpass");
+        const clientCollection = database.collection("client");
+        const { ObjectId } = require('mongodb');
 
-          // Update client balance immediately for ALL call types (including campaign calls)
-          const { connectToMongo, client: mongoClient } = require('../../models/mongodb.js');
-          await connectToMongo();
-          const database = mongoClient.db("talkGlimpass");
-          const clientCollection = database.collection("client");
-          const { ObjectId } = require('mongodb');
+        // Update client balance immediately for ALL calls (real-time balance updates)
+        await clientCollection.updateOne(
+          { _id: new ObjectId(clientId) },
+          { $set: { availableBalance: newBalance } }
+        );
 
-          // Update client balance immediately for ALL calls (real-time balance updates)
-          await clientCollection.updateOne(
-            { _id: new ObjectId(clientId) },
-            { $set: { availableBalance: newBalance } }
-          );
-
-          // Broadcast balance update via SSE for ALL calls (including campaign calls)
-          if (billingRouter.broadcastBalanceUpdate) {
-            try {
-              console.log(`📡 Broadcasting individual call balance update: ${clientId} -> ${newBalance} credits (Call Type: ${callType})`);
-              billingRouter.broadcastBalanceUpdate(clientId, newBalance, 'call_end');
-            } catch (error) {
-              console.warn('Failed to broadcast balance update:', error.message);
-            }
-          } else {
-            console.warn('⚠️ SSE broadcast function not available');
+        // Broadcast balance update via SSE for ALL calls (including campaign calls)
+        if (billingRouter.broadcastBalanceUpdate) {
+          try {
+            console.log(`📡 Broadcasting individual call balance update: ${clientId} -> ${newBalance} credits (Call Type: ${callType})`);
+            billingRouter.broadcastBalanceUpdate(clientId, newBalance, 'call_end');
+          } catch (error) {
+            console.warn('Failed to broadcast balance update:', error.message);
           }
         } else {
-          console.log(`💰 Skipping billing for ${callType} call - no client associated (duration: ${duration}s)`);
+          console.warn('⚠️ SSE broadcast function not available');
         }
         
-        // BILLING HISTORY: Only for non-campaign calls (incoming, test calls) and only if we have a client
+        // BILLING HISTORY: Only for non-campaign calls (incoming, test calls)
         // Campaign calls get billing history entries only at campaign completion
-        if (callType !== 'campaign' && clientId && existingClient) {
-          const { connectToMongo, client: mongoClient } = require('../../models/mongodb.js');
-          await connectToMongo();
-          const database = mongoClient.db("talkGlimpass");
+        if (callType !== 'campaign') {
           const billingHistoryCollection = database.collection("billingHistory");
-
-          const currentBalance = existingClient.availableBalance || 0;
-          const newBalance = currentBalance - creditsToDeduct;
 
           let billingDescription, campName;
           if (callType === 'testcall') {
@@ -2009,39 +2009,26 @@ router.post('/hangup-url', async (req, res) => {
 
           const historyResult = await billingHistoryCollection.insertOne(billingEntry);
           console.log(`✅ billingHistory entry created for ${callType}: ${historyResult.insertedId}`);
-        } else if (callType === 'campaign') {
-          console.log(`📋 Campaign call - balance updated but billing history deferred until campaign completion`);
         } else {
-          console.log(`📋 Skipping billing history for ${callType} call - no client associated`);
+          console.log(`📋 Campaign call - balance updated but billing history deferred until campaign completion`);
         }
         
-        // Save detailed call record for ALL calls (for tracking purposes) - even without client association
-        try {
-          await saveCallBillingDetail({
-            clientId: clientId, // May be null for unknown clients
-            callUuid: hangupData.CallUUID,
-            duration: duration,
-            type: callType,
-            from: hangupData.From,
-            to: hangupData.To,
-            credits: creditsToDeduct,
-            aiCredits: 0,
-            telephonyCredits: creditsToDeduct,
-            campaignId: callType === 'campaign' ? hangupData.campId : null,
-            campaignName: callType === 'campaign' ? `Campaign ${hangupData.campId}` : null
-          });
-          console.log(`✅ Call billing detail saved for ${callType} call: ${hangupData.CallUUID}`);
-        } catch (billingDetailError) {
-          console.warn(`⚠️ Failed to save call billing detail:`, billingDetailError.message);
-        }
+        // Save detailed call record for ALL calls (for tracking purposes)
+        await saveCallBillingDetail({
+          clientId: clientId,
+          callUuid: hangupData.CallUUID,
+          duration: duration,
+          type: callType,
+          from: hangupData.From,
+          to: hangupData.To,
+          credits: creditsToDeduct,
+          aiCredits: 0,
+          telephonyCredits: creditsToDeduct,
+          campaignId: callType === 'campaign' ? hangupData.campId : null,
+          campaignName: callType === 'campaign' ? `Campaign ${hangupData.campId}` : null
+        });
 
-        if (clientId && existingClient) {
-          const currentBalance = existingClient.availableBalance || 0;
-          const newBalance = currentBalance - creditsToDeduct;
-          console.log(`✅ Call processed: ${creditsToDeduct} credits deducted, balance updated to ${newBalance} (Call Type: ${callType})`);
-        } else {
-          console.log(`✅ Call processed: ${callType} call saved without billing (no client association)`);
-        }
+        console.log(`✅ Call processed: ${creditsToDeduct} credits deducted, balance updated to ${newBalance} (Call Type: ${callType})`);
 
         // Note: Campaign calls get real-time balance updates but billing history only at campaign end
         
