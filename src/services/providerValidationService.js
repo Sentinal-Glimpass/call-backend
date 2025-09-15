@@ -216,20 +216,48 @@ class ProviderValidationService {
     const startTime = Date.now();
     
     try {
-      const { accessToken, instanceId } = credentials;
+      let { accessToken, instanceId, apiEndpoint } = credentials;
       
-      if (!accessToken || !instanceId) {
+      if (!accessToken) {
         return {
           valid: false,
-          error: 'Missing accessToken or instanceId'
+          error: 'Missing accessToken'
         };
       }
       
-      console.log(`💬 Testing WATI credentials: ${instanceId}...`);
+      // Remove "Bearer " prefix if present
+      if (accessToken.startsWith('Bearer ')) {
+        accessToken = accessToken.substring(7);
+      }
       
-      // Test: Fetch WATI instance info
+      console.log(`💬 Testing WATI credentials...`);
+      
+      // Extract tenant ID from JWT token if no instanceId provided
+      let tenantId = instanceId;
+      if (!tenantId && !apiEndpoint) {
+        try {
+          const tokenPayload = JSON.parse(Buffer.from(accessToken.split('.')[1], 'base64').toString());
+          tenantId = tokenPayload.tenant_id;
+          console.log(`🔍 Extracted tenant ID from JWT: ${tenantId}`);
+        } catch (error) {
+          console.warn(`⚠️ Could not extract tenant ID from token: ${error.message}`);
+        }
+      }
+      
+      // Test: Fetch WATI business profile to validate credentials
       try {
-        const response = await axios.get(`https://live-server-113693.wati.io/api/v1/getBusinessProfile`, {
+        // Build API URL - use custom endpoint if provided, otherwise use tenant-specific URL
+        // Try getMessageTemplates endpoint as it's more commonly available than business profile
+        let watiApiUrl;
+        if (apiEndpoint) {
+          watiApiUrl = `${apiEndpoint}/getMessageTemplates`;
+        } else if (tenantId) {
+          watiApiUrl = `https://live-mt-server.wati.io/${tenantId}/api/v1/getMessageTemplates`;
+        } else {
+          watiApiUrl = `https://live-mt-server.wati.io/api/v1/getMessageTemplates`;
+        }
+        
+        const response = await axios.get(watiApiUrl, {
           headers: {
             'Authorization': `Bearer ${accessToken}`,
             'Content-Type': 'application/json'
@@ -237,17 +265,18 @@ class ProviderValidationService {
           timeout: 10000
         });
         
-        const profileData = response.data;
-        console.log(`✅ WATI instance verified: ${profileData.displayName || instanceId}`);
+        const templatesData = response.data;
+        const templateCount = templatesData.messageTemplates?.length || 0;
+        console.log(`✅ WATI credentials verified: ${templateCount} templates available`);
         
         return {
           valid: true,
           account: {
-            instanceId: instanceId,
-            displayName: profileData.displayName,
-            about: profileData.about,
-            phoneNumber: profileData.phoneNumber,
-            profilePicture: profileData.profilePicture
+            instanceId: instanceId || null,
+            tenantId: tenantId || null,
+            templateCount: templateCount,
+            apiEndpoint: apiEndpoint || null,
+            name: 'WATI Account'
           },
           testDuration: Date.now() - startTime,
           testedAt: new Date().toISOString()

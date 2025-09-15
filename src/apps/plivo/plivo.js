@@ -1694,6 +1694,39 @@ async function processCampaignAggregatedBilling(campaignId, campaignName, report
     const database = client.db("talkGlimpass");
     const clientCollection = database.collection("client");
     const billingHistoryCollection = database.collection("billingHistory");
+    const campaignCollection = database.collection("plivoCampaign");
+    
+    // CRITICAL FIX: Check if billing already processed to prevent duplicates
+    console.log(`🔍 Checking billing status for campaign ${campaignId} before processing...`);
+    
+    // First check the campaign's billing status
+    const campaign = await campaignCollection.findOne({ _id: new ObjectId(campaignId) });
+    if (!campaign) {
+      throw new Error(`Campaign not found: ${campaignId}`);
+    }
+    
+    if (campaign.isBalanceUpdated === true) {
+      console.log(`✅ Campaign ${campaignName} billing already processed - skipping duplicate billing`);
+      return;
+    }
+    
+    // Double-check: Look for existing billing entries for this campaign
+    const existingBilling = await billingHistoryCollection.findOne({ 
+      campaignId: campaignId,
+      desc: { $regex: `Campaign (completed|cancelled|failed): ${campaignName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}` }
+    });
+    
+    if (existingBilling) {
+      console.log(`⚠️ Found existing billing entry for campaign ${campaignName} - marking as processed and skipping`);
+      // Update the campaign to prevent future attempts
+      await campaignCollection.updateOne(
+        { _id: new ObjectId(campaignId) },
+        { $set: { isBalanceUpdated: true, billingProcessedAt: new Date() } }
+      );
+      return;
+    }
+    
+    console.log(`💰 Processing NEW billing for campaign ${campaignName} (status: ${campaignStatus})`);
     
     // Calculate total duration from all calls in the campaign (may be 0)
     const totalDuration = reportData.totalDuration || 0;
@@ -1752,8 +1785,21 @@ async function processCampaignAggregatedBilling(campaignId, campaignName, report
     // Update all callBillingDetails entries with actual credits
     await updateCampaignCallCredits(campaignId, totalCreditsToDeduct, totalDuration);
     
+    // CRITICAL: Mark campaign as billing processed to prevent future duplicates
+    await campaignCollection.updateOne(
+      { _id: new ObjectId(campaignId) },
+      { 
+        $set: { 
+          isBalanceUpdated: true, 
+          billingProcessedAt: new Date(),
+          billingEntryId: historyResult.insertedId 
+        } 
+      }
+    );
+    
     // NOTE: No balance update broadcast here since individual calls already handle real-time updates
     console.log(`✅ Campaign billing history completed (${campaignStatus}): billing entry created for ${totalCreditsToDeduct} credits. Balance already updated per call: ${currentBalance}`);
+    console.log(`🔒 Campaign ${campaignId} marked as billing processed to prevent duplicates`);
     
     return {
       success: true,
@@ -2620,81 +2666,65 @@ async function getCampaignAnalytics(campaignId) {
           _id: null,
           totalCalls: { $sum: 1 },
           totalDuration: { $sum: { $toInt: { $ifNull: ["$Duration", "0"] } } },
-          averageDuration: { $avg: { $toInt: { $ifNull: ["$Duration", "0"] } } },
-          callUUIDs: { $push: "$CallUUID" }
+          averageDuration: { $avg: { $toInt: { $ifNull: ["$Duration", "0"] } } }
         }
       }
     ];
     
     const campaignStats = await database.collection("plivoHangupData")
-      .aggregate(campaignStatsAggregation).toArray();
+      .aggregate(campaignStatsAggregation, { allowDiskUse: true }).toArray();
     
     if (campaignStats.length === 0) {
       return { status: 404, message: "Campaign not found or no call data available" };
     }
     
     const stats = campaignStats[0];
-    const callUUIDs = stats.callUUIDs;
     
-    // Pipeline 2: Simplified lead analysis using basic field matching
-    const leadAnalysisAggregation = [
-      { $match: { callUUID: { $in: callUUIDs } } },
-      // Group by callUUID to get latest entry per call
-      {
-        $sort: { callUUID: 1, _id: -1 }
-      },
-      {
-        $group: {
-          _id: "$callUUID",
-          latestLog: { $first: "$$ROOT" }
-        }
-      },
-      // Simple lead detection - check for common lead field patterns
-      {
-        $addFields: {
-          isLead: {
-            $or: [
-              { $regexMatch: { input: { $ifNull: ["$latestLog.is_lead", ""] }, regex: "(true|maybe|1)", options: "i" } },
-              { $regexMatch: { input: { $ifNull: ["$latestLog.leadAnalysis_is_lead", ""] }, regex: "(true|maybe|1)", options: "i" } },
-              { $regexMatch: { input: { $ifNull: ["$latestLog.lead_status", ""] }, regex: "(true|maybe|1)", options: "i" } },
-              { $regexMatch: { input: { $ifNull: ["$latestLog.isLead", ""] }, regex: "(true|maybe|1)", options: "i" } }
-            ]
-          }
-        }
-      },
-      {
-        $group: {
-          _id: null,
-          totalLeads: { $sum: { $cond: ["$isLead", 1, 0] } }
-        }
-      }
-    ];
-    
+    // Pipeline 2: Simplified lead analysis - direct query on logData
     const leadAnalysis = await database.collection("logData")
-      .aggregate(leadAnalysisAggregation).toArray();
+      .find({ 
+        campId: campaignId,
+        $or: [
+          { is_lead: { $regex: /(true|maybe|1)/i } },
+          { leadAnalysis_is_lead: { $regex: /(true|maybe|1)/i } },
+          { lead_status: { $regex: /(true|maybe|1)/i } },
+          { isLead: { $regex: /(true|maybe|1)/i } }
+        ]
+      }).toArray();
     
-    const totalLeads = leadAnalysis.length > 0 ? leadAnalysis[0].totalLeads : 0;
+    const totalLeads = leadAnalysis.length;
     
-    // Pipeline 3: Cost analysis from billing history
-    const costAnalysisAggregation = [
-      { 
-        $match: { 
-          campaignId: campaignId,
-          transactionType: "Dr" // Debit entries only
-        } 
-      },
-      {
-        $group: {
-          _id: null,
-          totalCost: { $sum: { $abs: "$balanceCount" } } // Convert negative to positive
-        }
-      }
-    ];
+    // Pipeline 3: Simplified cost analysis - separate queries
+    // First get direct campaign aggregate entries
+    const campaignCosts = await database.collection("billingHistory")
+      .find({ 
+        campaignId: campaignId, 
+        transactionType: "Dr" 
+      }).toArray();
     
-    const costAnalysis = await database.collection("billingHistory")
-      .aggregate(costAnalysisAggregation).toArray();
+    // Get individual call costs using a simpler approach
+    // For large campaigns, just use the campaign aggregate costs
+    let callCosts = [];
+    if (stats.totalCalls < 5000) {
+      // Only do individual call lookup for smaller campaigns
+      const callUUIDs = await database.collection("plivoHangupData")
+        .find({ campId: campaignId }, { projection: { CallUUID: 1 } })
+        .limit(5000)
+        .toArray();
+      
+      const callUUIDList = callUUIDs.map(doc => doc.CallUUID);
+      
+      callCosts = await database.collection("billingHistory")
+        .find({ 
+          callUUID: { $in: callUUIDList }, 
+          transactionType: "Dr" 
+        }).toArray();
+    }
     
-    const totalCost = costAnalysis.length > 0 ? costAnalysis[0].totalCost : 0;
+    // Calculate total cost
+    const campaignCostTotal = campaignCosts.reduce((sum, entry) => sum + Math.abs(entry.balanceCount || 0), 0);
+    const callCostTotal = callCosts.reduce((sum, entry) => sum + Math.abs(entry.balanceCount || 0), 0);
+    const totalCost = campaignCostTotal + callCostTotal;
     
     // Calculate derived metrics
     const averageDuration = Math.round(stats.averageDuration || 0);
@@ -2739,7 +2769,10 @@ async function getClientAnalytics(clientId, months = 12) {
     const monthlyExpenditureAggregation = [
       {
         $match: {
-          clientId: clientId,
+          $or: [
+            { clientId: clientId },
+            { clientId: clientId.toString() }
+          ],
           transactionType: "Dr",
           date: { $gte: startOfAnalysisPeriod }
         }
@@ -2751,7 +2784,6 @@ async function getClientAnalytics(clientId, months = 12) {
             month: { $month: "$date" }
           },
           totalExpenditure: { $sum: { $abs: "$balanceCount" } },
-          totalCalls: { $sum: 1 },
           totalDuration: { $sum: "$callDuration" }
         }
       },
@@ -2767,18 +2799,67 @@ async function getClientAnalytics(clientId, months = 12) {
         }
       },
       {
-        $sort: { "_id.year": -1, "_id.month": -1 }
+        $limit: 100
       }
     ];
     
-    const monthlyData = await database.collection("billingHistory")
-      .aggregate(monthlyExpenditureAggregation).toArray();
-    
-    // Pipeline 2: Current month and last month summary 
-    const currentMonthAggregation = [
+    // Pipeline 1b: Monthly call counts from actual call data
+    const monthlyCallsAggregation = [
       {
         $match: {
-          clientId: clientId,
+          $or: [
+            { clientId: clientId },
+            { clientId: clientId.toString() }
+          ],
+          createdAt: { $gte: startOfAnalysisPeriod }
+        }
+      },
+      {
+        $group: {
+          _id: {
+            year: { $year: "$createdAt" },
+            month: { $month: "$createdAt" }
+          },
+          totalCalls: { $sum: 1 }
+        }
+      },
+      {
+        $limit: 100
+      }
+    ];
+    
+    const [monthlyExpenditureData, monthlyCallsData] = await Promise.all([
+      database.collection("billingHistory").aggregate(monthlyExpenditureAggregation, { allowDiskUse: true }).toArray(),
+      database.collection("plivoHangupData").aggregate(monthlyCallsAggregation, { allowDiskUse: true }).toArray()
+    ]);
+
+    // Merge expenditure and call data
+    const monthlyData = monthlyExpenditureData.map(expData => {
+      const callData = monthlyCallsData.find(callData => 
+        callData._id.year === expData._id.year && callData._id.month === expData._id.month
+      );
+      return {
+        ...expData,
+        totalCalls: callData ? callData.totalCalls : 0
+      };
+    });
+
+    // Sort in JavaScript to avoid MongoDB memory issues
+    monthlyData.sort((a, b) => {
+      if (a._id.year !== b._id.year) {
+        return b._id.year - a._id.year; // Descending year
+      }
+      return b._id.month - a._id.month; // Descending month
+    });
+    
+    // Pipeline 2: Current month and last month summary 
+    const currentMonthExpenditureAggregation = [
+      {
+        $match: {
+          $or: [
+            { clientId: clientId },
+            { clientId: clientId.toString() }
+          ],
           transactionType: "Dr",
           date: { $gte: startOfCurrentMonth }
         }
@@ -2787,16 +2868,36 @@ async function getClientAnalytics(clientId, months = 12) {
         $group: {
           _id: null,
           currentMonthExpenditure: { $sum: { $abs: "$balanceCount" } },
-          currentMonthCalls: { $sum: 1 },
           currentMonthDuration: { $sum: "$callDuration" }
         }
       }
     ];
-    
-    const lastMonthAggregation = [
+
+    const currentMonthCallsAggregation = [
       {
         $match: {
-          clientId: clientId,
+          $or: [
+            { clientId: clientId },
+            { clientId: clientId.toString() }
+          ],
+          createdAt: { $gte: startOfCurrentMonth }
+        }
+      },
+      {
+        $group: {
+          _id: null,
+          currentMonthCalls: { $sum: 1 }
+        }
+      }
+    ];
+    
+    const lastMonthExpenditureAggregation = [
+      {
+        $match: {
+          $or: [
+            { clientId: clientId },
+            { clientId: clientId.toString() }
+          ],
           transactionType: "Dr",
           date: { $gte: startOfLastMonth, $lte: endOfLastMonth }
         }
@@ -2805,22 +2906,58 @@ async function getClientAnalytics(clientId, months = 12) {
         $group: {
           _id: null,
           lastMonthExpenditure: { $sum: { $abs: "$balanceCount" } },
-          lastMonthCalls: { $sum: 1 },
           lastMonthDuration: { $sum: "$callDuration" }
         }
       }
     ];
-    
-    const [currentMonthData, lastMonthData] = await Promise.all([
-      database.collection("billingHistory").aggregate(currentMonthAggregation).toArray(),
-      database.collection("billingHistory").aggregate(lastMonthAggregation).toArray()
-    ]);
-    
-    // Pipeline 3: Overall client statistics
-    const overallStatsAggregation = [
+
+    const lastMonthCallsAggregation = [
       {
         $match: {
-          clientId: clientId,
+          $or: [
+            { clientId: clientId },
+            { clientId: clientId.toString() }
+          ],
+          createdAt: { $gte: startOfLastMonth, $lte: endOfLastMonth }
+        }
+      },
+      {
+        $group: {
+          _id: null,
+          lastMonthCalls: { $sum: 1 }
+        }
+      }
+    ];
+    
+    const [currentMonthExpenditureData, currentMonthCallsData, lastMonthExpenditureData, lastMonthCallsData] = await Promise.all([
+      database.collection("billingHistory").aggregate(currentMonthExpenditureAggregation, { allowDiskUse: true }).toArray(),
+      database.collection("plivoHangupData").aggregate(currentMonthCallsAggregation, { allowDiskUse: true }).toArray(),
+      database.collection("billingHistory").aggregate(lastMonthExpenditureAggregation, { allowDiskUse: true }).toArray(),
+      database.collection("plivoHangupData").aggregate(lastMonthCallsAggregation, { allowDiskUse: true }).toArray()
+    ]);
+
+    // Merge current month data
+    const currentMonth = {
+      currentMonthExpenditure: currentMonthExpenditureData.length > 0 ? currentMonthExpenditureData[0].currentMonthExpenditure : 0,
+      currentMonthCalls: currentMonthCallsData.length > 0 ? currentMonthCallsData[0].currentMonthCalls : 0,
+      currentMonthDuration: currentMonthExpenditureData.length > 0 ? currentMonthExpenditureData[0].currentMonthDuration : 0
+    };
+
+    // Merge last month data  
+    const lastMonth = {
+      lastMonthExpenditure: lastMonthExpenditureData.length > 0 ? lastMonthExpenditureData[0].lastMonthExpenditure : 0,
+      lastMonthCalls: lastMonthCallsData.length > 0 ? lastMonthCallsData[0].lastMonthCalls : 0,
+      lastMonthDuration: lastMonthExpenditureData.length > 0 ? lastMonthExpenditureData[0].lastMonthDuration : 0
+    };
+    
+    // Pipeline 3: Overall client statistics - expenditure
+    const overallExpenditureAggregation = [
+      {
+        $match: {
+          $or: [
+            { clientId: clientId },
+            { clientId: clientId.toString() }
+          ],
           transactionType: "Dr"
         }
       },
@@ -2828,7 +2965,6 @@ async function getClientAnalytics(clientId, months = 12) {
         $group: {
           _id: null,
           totalLifetimeExpenditure: { $sum: { $abs: "$balanceCount" } },
-          totalLifetimeCalls: { $sum: 1 },
           totalLifetimeDuration: { $sum: "$callDuration" },
           averageCallCost: { $avg: { $abs: "$balanceCount" } },
           firstTransactionDate: { $min: "$date" },
@@ -2836,22 +2972,41 @@ async function getClientAnalytics(clientId, months = 12) {
         }
       }
     ];
+
+    // Pipeline 3b: Overall client statistics - call counts
+    const overallCallsAggregation = [
+      {
+        $match: {
+          $or: [
+            { clientId: clientId },
+            { clientId: clientId.toString() }
+          ]
+        }
+      },
+      {
+        $group: {
+          _id: null,
+          totalLifetimeCalls: { $sum: 1 }
+        }
+      }
+    ];
     
-    const overallStats = await database.collection("billingHistory")
-      .aggregate(overallStatsAggregation).toArray();
-    
-    // Extract current month and last month data
-    const currentMonth = currentMonthData.length > 0 ? currentMonthData[0] : {
-      currentMonthExpenditure: 0, currentMonthCalls: 0, currentMonthDuration: 0
+    const [overallExpenditureStats, overallCallsStats] = await Promise.all([
+      database.collection("billingHistory").aggregate(overallExpenditureAggregation, { allowDiskUse: true }).toArray(),
+      database.collection("plivoHangupData").aggregate(overallCallsAggregation, { allowDiskUse: true }).toArray()
+    ]);
+
+    // Merge overall statistics
+    const overallExpenditure = overallExpenditureStats.length > 0 ? overallExpenditureStats[0] : {
+      totalLifetimeExpenditure: 0, totalLifetimeDuration: 0, averageCallCost: 0, 
+      firstTransactionDate: null, lastTransactionDate: null
     };
     
-    const lastMonth = lastMonthData.length > 0 ? lastMonthData[0] : {
-      lastMonthExpenditure: 0, lastMonthCalls: 0, lastMonthDuration: 0
-    };
+    const overallCalls = overallCallsStats.length > 0 ? overallCallsStats[0] : { totalLifetimeCalls: 0 };
     
-    const overall = overallStats.length > 0 ? overallStats[0] : {
-      totalLifetimeExpenditure: 0, totalLifetimeCalls: 0, totalLifetimeDuration: 0, 
-      averageCallCost: 0, firstTransactionDate: null, lastTransactionDate: null
+    const overall = {
+      ...overallExpenditure,
+      totalLifetimeCalls: overallCalls.totalLifetimeCalls
     };
     
     // Calculate month-over-month growth

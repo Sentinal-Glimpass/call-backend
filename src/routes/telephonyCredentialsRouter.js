@@ -83,36 +83,65 @@ const {
  */
 router.post('/add', authenticateToken, auditLog, async (req, res) => {
   try {
-    const { clientId, provider, accountSid, authToken, phoneNumbers, metadata } = req.body;
+    const { clientId, provider } = req.body;
     
-    // Validate required fields
-    if (!clientId || !provider || !accountSid || !authToken) {
+    // Validate basic required fields
+    if (!clientId || !provider) {
       return res.status(400).json({
         success: false,
-        error: 'Missing required fields: clientId, provider, accountSid, authToken'
+        error: 'Missing required fields: clientId, provider'
       });
     }
     
-    const result = await TelephonyCredentialsService.addCredentials({
-      clientId,
-      provider,
-      accountSid,
-      authToken,
-      phoneNumbers,
-      metadata
+    // Get provider configuration to determine required fields
+    const ProviderMetadataService = require('../services/providerMetadataService');
+    const providerConfig = ProviderMetadataService.getProviderConfig(provider);
+    
+    if (!providerConfig) {
+      return res.status(400).json({
+        success: false,
+        error: `Unsupported provider: ${provider}`
+      });
+    }
+    
+    // Validate provider-specific required fields
+    const missingFields = [];
+    providerConfig.requiredFields.forEach(field => {
+      if (!req.body[field.key]) {
+        missingFields.push(field.label);
+      }
     });
+    
+    if (missingFields.length > 0) {
+      return res.status(400).json({
+        success: false,
+        error: `Missing required fields for ${provider}: ${missingFields.join(', ')}`
+      });
+    }
+    
+    // Pass all request body data to the service (it will handle field extraction)
+    const result = await TelephonyCredentialsService.addCredentials(req.body);
     
     if (!result.success) {
       return res.status(400).json(result);
     }
     
-    res.status(201).json({
+    // Build response based on what was actually added
+    const response = {
       success: true,
       message: 'Telephony credentials added successfully',
       id: result.id,
-      provider: result.provider,
-      accountSid: result.accountSid
-    });
+      provider: result.provider || provider
+    };
+    
+    // Add provider-specific identifier field
+    if (provider === 'wati') {
+      response.accessToken = result.accessToken ? 'provided' : 'not provided';
+    } else {
+      response.accountSid = result.accountSid;
+    }
+    
+    res.status(201).json(response);
     
   } catch (error) {
     console.error('❌ Error adding telephony credentials:', error);

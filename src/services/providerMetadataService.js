@@ -150,29 +150,37 @@ class ProviderMetadataService {
             },
             helpText: "API access token from WATI dashboard",
             order: 1
-          },
-          {
-            key: "instanceId", 
-            label: "Instance ID",
-            type: "text",
-            placeholder: "your_instance_id",
-            validation: {
-              pattern: "^[a-zA-Z0-9_-]+$",
-              message: "Only alphanumeric characters, underscores, and hyphens allowed"
-            },
-            helpText: "Your WATI instance identifier from dashboard",
-            order: 2
           }
         ],
         
         optionalFields: [
+          {
+            key: "apiEndpoint",
+            label: "API Endpoint",
+            type: "url",
+            placeholder: "https://your-domain.wati.io/api/v1",
+            helpText: "Your WATI API endpoint URL from dashboard (leave empty to use default)",
+            order: 2
+          },
+          {
+            key: "instanceId", 
+            label: "Instance ID (Legacy)",
+            type: "text",
+            placeholder: "your_instance_id",
+            validation: {
+              pattern: "^[a-zA-Z0-9_-]*$",
+              message: "Only alphanumeric characters, underscores, and hyphens allowed"
+            },
+            helpText: "Legacy instance ID - only needed for older WATI setups",
+            order: 3
+          },
           {
             key: "webhookUrl",
             label: "Webhook URL",
             type: "url",
             placeholder: "https://your-domain.com/wati/webhook",
             helpText: "URL for receiving WATI webhook notifications",
-            order: 3
+            order: 4
           }
         ]
       }

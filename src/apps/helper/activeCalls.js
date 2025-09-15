@@ -146,6 +146,8 @@ async function waitForAvailableSlot(clientId) {
  * Wait for concurrency slot - try 1000 times then give up
  */
 async function waitForSlot(clientId) {
+  const startTime = Date.now();
+  
   for (let i = 0; i < 1000; i++) {
     const [clientCheck, globalCheck] = await Promise.all([
       checkClientConcurrency(clientId),
@@ -153,13 +155,19 @@ async function waitForSlot(clientId) {
     ]);
     
     if (clientCheck.allowed && globalCheck.allowed) {
-      return true;
+      return {
+        success: true,
+        waitTime: Date.now() - startTime
+      };
     }
     
     await new Promise(resolve => setTimeout(resolve, 2000));
   }
   
-  return false; // Failed after 1000 attempts
+  return {
+    success: false,
+    waitTime: Date.now() - startTime
+  }; // Failed after 1000 attempts
 }
 
 /**
@@ -477,12 +485,13 @@ async function processSingleCall(callParams) {
     await lazyCleanupStuckCalls();
     
     // Step 1: Wait for concurrency slot
-    const hasSlot = await waitForSlot(clientId);
-    if (!hasSlot) {
+    const slotResult = await waitForSlot(clientId);
+    if (!slotResult.success) {
       return {
         success: false,
         error: 'System overloaded - no slots available',
-        shouldPauseCampaign: true
+        shouldPauseCampaign: true,
+        waitTime: slotResult.waitTime
       };
     }
     

@@ -36,6 +36,7 @@ const phoneProviderRouter = require('./src/routes/phoneProviderRouter');
 const twilioRouter = require('./src/routes/twilioRouter');
 const telephonyCredentialsRouter = require('./src/routes/telephonyCredentialsRouter');
 const providerConfigRouter = require('./src/routes/providerConfigRouter');
+const toolsRouter = require('./src/routes/toolsRouter');
 const apiKeyValidator = require('./src/middleware/apiKeyValidator')
 const { apiLogger, requestCounter } = require('./src/middleware/apiLogger')
 // const { apiLimiter } = require('./src/middleware/authMiddleware')
@@ -238,6 +239,8 @@ app.use('/phone-provider', phoneProviderRouter);
 app.use('/twilio', twilioRouter);
 app.use('/telephony-credentials', telephonyCredentialsRouter);
 app.use('/provider-config', providerConfigRouter);
+app.use('/api/tools', toolsRouter);
+app.use('/wati', toolsRouter); // Direct mount for WATI endpoints
 
 // LEGACY ROUTES - DEPRECATED (DO NOT USE)
 // app.use('/graph', creatorRouter);
