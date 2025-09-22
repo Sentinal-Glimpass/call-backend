@@ -641,21 +641,14 @@ router.post('/validate-config', authenticateToken, auditLog, async (req, res) =>
 
 /**
  * @swagger
- * /api/tools/wati/{clientId}/templates:
+ * /api/tools/wati/templates:
  *   get:
  *     tags: [Tools]
- *     summary: Fetch available WATI WhatsApp templates for client
- *     description: Returns WATI message templates for the specified client using their stored credentials
+ *     summary: Fetch available WATI WhatsApp templates for authenticated client
+ *     description: Returns WATI message templates for the authenticated client using their stored credentials
  *     security:
  *       - BearerAuth: []
  *     parameters:
- *       - in: path
- *         name: clientId
- *         required: true
- *         schema:
- *           type: string
- *         description: Client ObjectId
- *         example: "67a758ab6da08780e5928813"
  *       - in: query
  *         name: language
  *         schema:
@@ -703,9 +696,10 @@ router.post('/validate-config', authenticateToken, auditLog, async (req, res) =>
  *       500:
  *         description: Error fetching templates
  */
-router.get('/wati/:clientId/templates', authenticateToken, auditLog, async (req, res) => {
+router.get('/wati/templates', authenticateToken, auditLog, async (req, res) => {
   try {
-    const { clientId } = req.params;
+    // Get client ID from JWT token instead of URL parameter
+    const clientId = req.clientData._id.toString();
     const { language, category, status } = req.query;
     
     const result = await getWatiTemplates(clientId, { language, category, status });
@@ -722,61 +716,48 @@ router.get('/wati/:clientId/templates', authenticateToken, auditLog, async (req,
 
 /**
  * @swagger
- * /api/tools/wati/{clientId}/tools:
+ * /api/tools/wati/tools:
  *   get:
  *     tags: [Tools]
- *     summary: Get WATI tools for client
- *     description: Retrieve all WATI tool configurations for a specific client
+ *     summary: Get WATI tools for authenticated client
+ *     description: Retrieve all WATI tool configurations for the authenticated client
  *     security:
  *       - BearerAuth: []
- *     parameters:
- *       - in: path
- *         name: clientId
- *         required: true
- *         schema:
- *           type: string
- *         description: Client ID
  *     responses:
  *       200:
  *         description: WATI tools retrieved successfully
  */
-router.get('/wati/:clientId/tools', authenticateToken, auditLog, async (req, res) => {
+router.get('/wati/tools', authenticateToken, auditLog, async (req, res) => {
   try {
-    const { clientId } = req.params;
-    
+    // Get client ID from JWT token instead of URL parameter
+    const clientId = req.clientData._id.toString();
+
     // Filter for WATI tools only - pass client_id in filters
-    const result = await getClientToolConfigs({ 
-      client_id: clientId, 
-      provider: 'wati' 
+    const result = await getClientToolConfigs({
+      client_id: clientId,
+      provider: 'wati'
     });
-    
+
     res.status(result.status || 200).json(result);
   } catch (error) {
     console.error('Error fetching WATI tools:', error);
-    res.status(500).json({ 
-      success: false, 
+    res.status(500).json({
+      success: false,
       message: 'Internal server error',
-      error: error.message 
+      error: error.message
     });
   }
 });
 
 /**
  * @swagger
- * /api/tools/wati/{clientId}/tools:
+ * /api/tools/wati/tools:
  *   post:
  *     tags: [Tools]
  *     summary: Create WATI tool from template
- *     description: Create a new WATI tool configuration from a WhatsApp template
+ *     description: Create a new WATI tool configuration from a WhatsApp template for the authenticated client
  *     security:
  *       - BearerAuth: []
- *     parameters:
- *       - in: path
- *         name: clientId
- *         required: true
- *         schema:
- *           type: string
- *         description: Client ID
  *     requestBody:
  *       required: true
  *       content:
@@ -800,9 +781,10 @@ router.get('/wati/:clientId/tools', authenticateToken, auditLog, async (req, res
  *       201:
  *         description: WATI tool created successfully
  */
-router.post('/wati/:clientId/tools', authenticateToken, auditLog, async (req, res) => {
+router.post('/wati/tools', authenticateToken, auditLog, async (req, res) => {
   try {
-    const { clientId } = req.params;
+    // Get client ID from JWT token instead of URL parameter
+    const clientId = req.clientData._id.toString();
     const { templateName, toolName, description, enabled = true } = req.body;
     
     if (!templateName) {
@@ -904,20 +886,14 @@ router.post('/wati/:clientId/tools', authenticateToken, auditLog, async (req, re
 
 /**
  * @swagger
- * /api/tools/wati/{clientId}/tools/{toolId}:
+ * /api/tools/wati/tools/{toolId}:
  *   put:
  *     tags: [Tools]
  *     summary: Update WATI tool configuration
- *     description: Update an existing WATI tool configuration
+ *     description: Update an existing WATI tool configuration for the authenticated client
  *     security:
  *       - BearerAuth: []
  *     parameters:
- *       - in: path
- *         name: clientId
- *         required: true
- *         schema:
- *           type: string
- *         description: Client ID
  *       - in: path
  *         name: toolId
  *         required: true
@@ -943,9 +919,11 @@ router.post('/wati/:clientId/tools', authenticateToken, auditLog, async (req, re
  *       200:
  *         description: WATI tool updated successfully
  */
-router.put('/wati/:clientId/tools/:toolId', authenticateToken, auditLog, async (req, res) => {
+router.put('/wati/tools/:toolId', authenticateToken, auditLog, async (req, res) => {
   try {
-    const { clientId, toolId } = req.params;
+    // Get client ID from JWT token instead of URL parameter
+    const clientId = req.clientData._id.toString();
+    const { toolId } = req.params;
     const updates = req.body;
     
     const result = await updateClientToolConfig(toolId, clientId, updates);
@@ -963,20 +941,14 @@ router.put('/wati/:clientId/tools/:toolId', authenticateToken, auditLog, async (
 
 /**
  * @swagger
- * /api/tools/wati/{clientId}/tools/{toolId}:
+ * /api/tools/wati/tools/{toolId}:
  *   delete:
  *     tags: [Tools]
  *     summary: Delete WATI tool configuration
- *     description: Delete a WATI tool configuration
+ *     description: Delete a WATI tool configuration for the authenticated client
  *     security:
  *       - BearerAuth: []
  *     parameters:
- *       - in: path
- *         name: clientId
- *         required: true
- *         schema:
- *           type: string
- *         description: Client ID
  *       - in: path
  *         name: toolId
  *         required: true
@@ -987,9 +959,11 @@ router.put('/wati/:clientId/tools/:toolId', authenticateToken, auditLog, async (
  *       200:
  *         description: WATI tool deleted successfully
  */
-router.delete('/wati/:clientId/tools/:toolId', authenticateToken, auditLog, async (req, res) => {
+router.delete('/wati/tools/:toolId', authenticateToken, auditLog, async (req, res) => {
   try {
-    const { clientId, toolId } = req.params;
+    // Get client ID from JWT token instead of URL parameter
+    const clientId = req.clientData._id.toString();
+    const { toolId } = req.params;
     
     const result = await deleteClientToolConfig(toolId, clientId);
     
