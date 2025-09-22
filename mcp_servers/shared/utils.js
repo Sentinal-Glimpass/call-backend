@@ -71,8 +71,11 @@ function replaceTemplateVariables(text, variables = {}) {
   let result = text;
 
   Object.entries(variables).forEach(([key, value]) => {
-    const regex = new RegExp(`\\{\\{${key}\\}\\}`, 'g');
-    result = result.replace(regex, value || '');
+    // Support both single {name} and double {{name}} curly braces
+    const singleRegex = new RegExp(`\\{${key}\\}`, 'g');
+    const doubleRegex = new RegExp(`\\{\\{${key}\\}\\}`, 'g');
+    result = result.replace(singleRegex, value || '');
+    result = result.replace(doubleRegex, value || '');
   });
 
   return result;

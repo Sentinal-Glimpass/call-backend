@@ -20,137 +20,54 @@ class GmailMCPServer extends BaseMCPServer {
     this.setupTools();
   }
 
-  setupTools() {
-    // Send email using template
-    this.registerTool(
-      'gmail_send_template_email',
-      'Send email using Gmail/SMTP with template and variables',
-      createMCPSchema({
-        client_id: {
-          type: 'string',
-          description: 'Client ID for credential lookup'
-        },
-        to: {
-          type: 'string',
-          description: 'Recipient email address'
-        },
-        template_name: {
-          type: 'string',
-          description: 'Email template name to use'
-        },
-        variables: {
-          type: 'object',
-          description: 'Template variables as key-value pairs',
-          default: {}
-        },
-        cc: {
-          type: 'string',
-          description: 'CC email address (optional)'
-        },
-        bcc: {
-          type: 'string',
-          description: 'BCC email address (optional)'
-        }
-      }, ['client_id', 'to', 'template_name']),
-      this.sendTemplateEmail.bind(this)
-    );
-
-    // Send simple email
-    this.registerTool(
-      'gmail_send_email',
-      'Send simple email via Gmail/SMTP',
-      createMCPSchema({
-        client_id: {
-          type: 'string',
-          description: 'Client ID for credential lookup'
-        },
-        to: {
-          type: 'string',
-          description: 'Recipient email address'
-        },
-        subject: {
-          type: 'string',
-          description: 'Email subject line'
-        },
-        body: {
-          type: 'string',
-          description: 'Email body content (HTML or plain text)'
-        },
-        cc: {
-          type: 'string',
-          description: 'CC email address (optional)'
-        },
-        bcc: {
-          type: 'string',
-          description: 'BCC email address (optional)'
-        },
-        html: {
-          type: 'boolean',
-          description: 'Whether body is HTML content',
-          default: false
-        }
-      }, ['client_id', 'to', 'subject', 'body']),
-      this.sendEmail.bind(this)
-    );
-
-    // Get email templates
-    this.registerTool(
-      'gmail_get_templates',
-      'Get available email templates for client',
-      createMCPSchema({
-        client_id: {
-          type: 'string',
-          description: 'Client ID for template lookup'
-        },
-        template_type: {
-          type: 'string',
-          description: 'Filter by template type (welcome, notification, etc.)'
-        }
-      }, ['client_id']),
-      this.getTemplates.bind(this)
-    );
+  async setupTools() {
+    // No static tools - will be dynamically loaded
   }
 
-  async sendTemplateEmail(args) {
+  async sendUserEmail(tool, args) {
     try {
-      this.validateArgs(args, ['client_id', 'to', 'template_name']);
-
-      const { client_id, to, template_name, variables = {}, cc, bcc } = args;
+      const { to, ...templateVars } = args;
 
       // Validate email addresses
       validateEmail(to);
-      if (cc) validateEmail(cc);
-      if (bcc) validateEmail(bcc);
 
-      // Get email template
-      const templateResponse = await makeInternalAPIRequest('/api/tools/gmail/templates', {
-        method: 'GET',
-        params: { client_id, template_name }
-      });
+      // Get template if tool uses template
+      if (tool.template_id) {
+        const templateResponse = await makeInternalAPIRequest(`/api/tools/gmail/templates?client_id=${this.clientId}`, {
+          method: 'GET'
+        });
 
-      const template = templateResponse.templates?.find(t => t.template_name === template_name);
-      if (!template) {
-        throw new Error(`Email template '${template_name}' not found`);
+        const template = templateResponse.data?.find(t => t._id === tool.template_id);
+        if (!template) {
+          throw new Error(`Email template not found for tool: ${tool.name}`);
+        }
+
+        // Replace variables in template
+        const subject = replaceTemplateVariables(template.subject, templateVars);
+        const body = replaceTemplateVariables(template.body_text || template.body_html, templateVars);
+
+        // Send email using the internal send method
+        return await this.sendEmail({
+          client_id: this.clientId,
+          to,
+          subject,
+          body,
+          html: !!template.body_html // Use HTML if body_html exists
+        });
+      } else {
+        // For non-template tools, use direct email sending
+        return await this.sendEmail({
+          client_id: this.clientId,
+          to,
+          subject: templateVars.subject || 'Email from Gmail MCP Server',
+          body: templateVars.body || templateVars.content || 'No content provided',
+          html: false
+        });
       }
 
-      // Replace variables in template
-      const subject = replaceTemplateVariables(template.subject, variables);
-      const body = replaceTemplateVariables(template.body, variables);
-
-      // Send email using the internal send method
-      return await this.sendEmail({
-        client_id,
-        to,
-        subject,
-        body,
-        cc,
-        bcc,
-        html: true // Templates are usually HTML
-      });
-
     } catch (error) {
-      console.error('Error sending template email:', error);
-      return formatMCPResponse(false, null, 'Failed to send template email', error.message);
+      console.error('Error sending user email:', error);
+      return formatMCPResponse(false, null, 'Failed to send email', error.message);
     }
   }
 
@@ -222,32 +139,6 @@ class GmailMCPServer extends BaseMCPServer {
     }
   }
 
-  async getTemplates(args) {
-    try {
-      this.validateArgs(args, ['client_id']);
-
-      const { client_id, template_type } = args;
-
-      // Use internal API to get templates
-      const params = { client_id };
-      if (template_type) params.template_type = template_type;
-
-      const response = await makeInternalAPIRequest('/api/tools/gmail/templates', {
-        method: 'GET',
-        params
-      });
-
-      return formatMCPResponse(true, {
-        templates: response.templates || [],
-        count: response.count || 0,
-        template_type: template_type || 'all'
-      }, 'Email templates retrieved successfully');
-
-    } catch (error) {
-      console.error('Error getting email templates:', error);
-      return formatMCPResponse(false, null, 'Failed to get email templates', error.message);
-    }
-  }
 
   // HTTP handling methods for cross-server communication
   async setAgentContext(agentId, clientId) {
@@ -362,84 +253,127 @@ class GmailMCPServer extends BaseMCPServer {
   }
 
   async handleToolsList() {
-    return {
-      tools: [
-        {
-          name: 'gmail_send_template_email',
-          description: 'Send email using Gmail/SMTP with template and variables',
-          inputSchema: {
-            type: 'object',
-            properties: {
-              to: { type: 'string', description: 'Recipient email address' },
-              template_name: { type: 'string', description: 'Email template name to use' },
-              variables: { type: 'object', description: 'Template variables', default: {} },
-              cc: { type: 'string', description: 'CC email address (optional)' },
-              bcc: { type: 'string', description: 'BCC email address (optional)' }
-            },
-            required: ['to', 'template_name']
-          }
-        },
-        {
-          name: 'gmail_send_email',
-          description: 'Send simple email via Gmail/SMTP',
-          inputSchema: {
-            type: 'object',
-            properties: {
-              to: { type: 'string', description: 'Recipient email address' },
-              subject: { type: 'string', description: 'Email subject line' },
-              body: { type: 'string', description: 'Email body content' },
-              cc: { type: 'string', description: 'CC email address (optional)' },
-              bcc: { type: 'string', description: 'BCC email address (optional)' },
-              html: { type: 'boolean', description: 'Whether body is HTML', default: false }
-            },
-            required: ['to', 'subject', 'body']
-          }
-        },
-        {
-          name: 'gmail_get_templates',
-          description: 'Get available email templates',
-          inputSchema: {
-            type: 'object',
-            properties: {
-              template_type: { type: 'string', description: 'Filter by template type' }
+    try {
+      // Get user-created email tools for this client
+      const response = await makeInternalAPIRequest(`/api/tools/gmail?client_id=${this.clientId}`, {
+        method: 'GET'
+      });
+
+      const tools = [];
+
+      if (response.data && response.data.length > 0) {
+        for (const tool of response.data) {
+          if (tool.enabled) {
+            // Get template details to build dynamic schema
+            let inputSchema = {
+              type: 'object',
+              properties: {
+                to: { type: 'string', description: 'Recipient email address' }
+              },
+              required: ['to']
+            };
+
+            // If it's a template-based tool, get template variables
+            if (tool.template_id) {
+              try {
+                const templateResponse = await makeInternalAPIRequest(`/api/tools/gmail/templates?client_id=${this.clientId}`, {
+                  method: 'GET'
+                });
+
+                const template = templateResponse.data?.find(t => t._id === tool.template_id);
+                if (template && template.variables) {
+                  // Add template variables to schema
+                  for (const variable of template.variables) {
+                    inputSchema.properties[variable.name] = {
+                      type: 'string',
+                      description: variable.description || `Template variable: ${variable.name}`
+                    };
+                    inputSchema.required.push(variable.name);
+                  }
+                }
+              } catch (templateError) {
+                console.error('Error fetching template for tool:', templateError);
+              }
             }
+
+            tools.push({
+              name: tool.name,
+              description: tool.description || 'Send email',
+              inputSchema: inputSchema
+            });
           }
         }
-      ]
-    };
+      }
+
+      return { tools };
+    } catch (error) {
+      console.error('Error getting tools list:', error);
+      return { tools: [] };
+    }
   }
 
   async handleToolCall(toolName, args) {
-    // Add client_id to args from context
-    const argsWithContext = {
-      ...args,
-      client_id: this.clientId
-    };
+    try {
+      // Get user-created email tool details
+      const response = await makeInternalAPIRequest(`/api/tools/gmail?client_id=${this.clientId}`, {
+        method: 'GET'
+      });
 
-    let result;
-    switch (toolName) {
-      case 'gmail_send_template_email':
-        result = await this.sendTemplateEmail(argsWithContext);
-        break;
-      case 'gmail_send_email':
-        result = await this.sendEmail(argsWithContext);
-        break;
-      case 'gmail_get_templates':
-        result = await this.getTemplates(argsWithContext);
-        break;
-      default:
-        throw new Error(`Unknown tool: ${toolName}`);
-    }
+      const tool = response.data?.find(t => t.name === toolName && t.enabled);
+      if (!tool) {
+        throw new Error(`Tool '${toolName}' not found or not enabled`);
+      }
 
-    // Return MCP tool call response format
-    return {
-      content: [
-        {
-          type: 'text',
-          text: JSON.stringify(result, null, 2)
+      // Validate required parameters based on template variables
+      const requiredParams = ['to'];
+
+      if (tool.template_id) {
+        // Get template to determine required variables
+        const templateResponse = await makeInternalAPIRequest(`/api/tools/gmail/templates?client_id=${this.clientId}`, {
+          method: 'GET'
+        });
+
+        const template = templateResponse.data?.find(t => t._id === tool.template_id);
+        if (template && template.variables) {
+          // Add all template variables as required
+          for (const variable of template.variables) {
+            requiredParams.push(variable.name);
+          }
         }
-      ]
-    };
+      }
+
+      // Validate that all required parameters are provided
+      const missingParams = requiredParams.filter(param => !args[param]);
+      if (missingParams.length > 0) {
+        throw new Error(`Missing required parameters: ${missingParams.join(', ')}`);
+      }
+
+      // Use the user-created tool to send email
+      const result = await this.sendUserEmail(tool, args);
+
+      // Return MCP tool call response format
+      return {
+        content: [
+          {
+            type: 'text',
+            text: JSON.stringify(result, null, 2)
+          }
+        ]
+      };
+    } catch (error) {
+      console.error('Error in tool call:', error);
+      return {
+        content: [
+          {
+            type: 'text',
+            text: JSON.stringify({
+              success: false,
+              error: error.message
+            }, null, 2)
+          }
+        ]
+      };
+    }
   }
 }
 

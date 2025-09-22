@@ -706,8 +706,8 @@ async function createEmailTemplate(clientId, templateData) {
       template_name: templateData.template_name,
       template_type: templateData.template_type || 'custom',
       subject: templateData.subject || '',
-      body_html: templateData.body_html || '',
-      body_text: templateData.body_text || '',
+      body_html: templateData.body_html || templateData.html_content || '',
+      body_text: templateData.body_text || templateData.text_content || '',
       variables: templateData.variables || [],
       attachments: [], // Will be populated via separate upload endpoint
       description: templateData.description || '',
