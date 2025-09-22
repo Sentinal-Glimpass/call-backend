@@ -349,13 +349,25 @@ router.get('/client/:clientId/status', async (req, res) => {
     const defaultProviders = {
       plivo_active: true,
       twilio_active: false,
-      wati_active: false
+      wati_active: false,
+      gmail_active: false
     };
-    
+
+    const rawProviderStatus = clientData.telephonyProviders || {};
+
+    // Handle migration from email_active to gmail_active
     const providerStatus = {
       ...defaultProviders,
-      ...clientData.telephonyProviders
+      ...rawProviderStatus
     };
+
+    // Remove deprecated email_active field and migrate to gmail_active if needed
+    if ('email_active' in providerStatus) {
+      if (providerStatus.email_active && !('gmail_active' in rawProviderStatus)) {
+        providerStatus.gmail_active = providerStatus.email_active;
+      }
+      delete providerStatus.email_active;
+    }
     
     // Get configured credentials
     const credentials = await TelephonyCredentialsService.listClientCredentials(clientId);
@@ -429,7 +441,7 @@ router.post('/client/:clientId/activate', async (req, res) => {
     }
     
     // Validate provider flags
-    const validProviders = ['plivo_active', 'twilio_active', 'wati_active'];
+    const validProviders = ['plivo_active', 'twilio_active', 'wati_active', 'gmail_active'];
     const updates = {};
     const validationResults = {};
     
@@ -707,6 +719,7 @@ router.post('/client/:clientId/sync-phone-numbers', async (req, res) => {
     if (providerStatus.plivo_active) activeProviders.push('plivo');
     if (providerStatus.twilio_active) activeProviders.push('twilio');
     if (providerStatus.wati_active) activeProviders.push('wati');
+    if (providerStatus.gmail_active) activeProviders.push('gmail');
     
     const providersToSync = specificProviders || activeProviders;
     

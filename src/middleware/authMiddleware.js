@@ -271,11 +271,160 @@ const auditLog = async (req, res, next) => {
   }
 };
 
+// Super Key Authentication middleware (for admin and bot operations)
+const authenticateSuperKey = (req, res, next) => {
+  try {
+    const authHeader = req.headers['authorization'];
+    const token = authHeader && authHeader.split(' ')[1]; // Bearer TOKEN
+
+    if (!token) {
+      return res.status(401).json({
+        error: 'Super key required',
+        message: 'Please provide a valid super key for this operation'
+      });
+    }
+
+    if (token !== process.env.SUPER_KEY) {
+      return res.status(403).json({
+        error: 'Invalid super key',
+        message: 'The provided super key is invalid'
+      });
+    }
+
+    // Add super key context to request
+    req.superKeyAuth = true;
+
+    next();
+  } catch (error) {
+    console.error('Super key auth error:', error);
+    res.status(500).json({
+      error: 'Authentication failed',
+      message: 'Internal server error during super key authentication'
+    });
+  }
+};
+
+// Dual authentication middleware (JWT or Super Key)
+const authenticateJWTOrSuperKey = async (req, res, next) => {
+  try {
+    const authHeader = req.headers['authorization'];
+    const token = authHeader && authHeader.split(' ')[1];
+
+    if (!token) {
+      return res.status(401).json({
+        error: 'Authentication required',
+        message: 'Please provide either JWT token or super key'
+      });
+    }
+
+    // Check if it's a super key first
+    if (token === process.env.SUPER_KEY) {
+      req.superKeyAuth = true;
+      return next();
+    }
+
+    // Otherwise, try JWT authentication
+    try {
+      const decoded = jwt.verify(token, process.env.JWT_SECRET);
+
+      // Get fresh user data from database
+      await connectToMongo();
+      const database = client.db("talkGlimpass");
+      const collection = database.collection("client");
+
+      const clientData = await collection.findOne({
+        _id: new ObjectId(decoded.clientId)
+      });
+
+      if (!clientData) {
+        return res.status(403).json({
+          error: 'Invalid token',
+          message: 'User not found or token expired'
+        });
+      }
+
+      // Add user data to request object
+      req.user = {
+        clientId: clientData._id.toString(),
+        email: clientData.email,
+        name: clientData.name,
+        company: clientData.company,
+        tokens: clientData.tokens || 0,
+        isActive: clientData.isActive !== false
+      };
+
+      // Check if user is active
+      if (!req.user.isActive) {
+        return res.status(403).json({
+          error: 'Account suspended',
+          message: 'Your account has been suspended. Please contact support.'
+        });
+      }
+
+      next();
+    } catch (jwtError) {
+      if (jwtError.name === 'TokenExpiredError') {
+        return res.status(401).json({
+          error: 'Token expired',
+          message: 'Please login again to continue'
+        });
+      }
+      if (jwtError.name === 'JsonWebTokenError') {
+        return res.status(403).json({
+          error: 'Invalid authentication',
+          message: 'Please provide a valid JWT token or super key'
+        });
+      }
+      throw jwtError;
+    }
+  } catch (error) {
+    console.error('Dual auth middleware error:', error);
+    res.status(500).json({
+      error: 'Authentication failed',
+      message: 'Internal server error during authentication'
+    });
+  }
+};
+
+// Enhanced resource ownership validation for dual auth
+const validateResourceOwnershipDual = (req, res, next) => {
+  // If super key is used, skip ownership validation
+  if (req.superKeyAuth) {
+    return next();
+  }
+
+  // For JWT users, validate ownership as usual
+  const clientIdFromBody = req.body.clientId;
+  const clientIdFromParams = req.params.clientId;
+  const clientIdFromQuery = req.query.clientId;
+
+  const providedClientId = clientIdFromBody || clientIdFromParams || clientIdFromQuery;
+
+  // If no clientId is provided in request, inject the authenticated user's clientId
+  if (!providedClientId) {
+    req.body.clientId = req.user.clientId;
+    return next();
+  }
+
+  // If clientId is provided, validate ownership
+  if (providedClientId !== req.user.clientId) {
+    return res.status(403).json({
+      error: 'Access denied',
+      message: 'You can only access your own resources'
+    });
+  }
+
+  next();
+};
+
 module.exports = {
   antiAutomationDelay,
   resetLoginAttempts,
   authenticateToken,
+  authenticateSuperKey,
+  authenticateJWTOrSuperKey,
   validateResourceOwnership,
+  validateResourceOwnershipDual,
   checkTokenBalance,
   deductTokens,
   auditLog

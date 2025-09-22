@@ -373,6 +373,48 @@ class TelephonyCredentialsService {
   }
 
   /**
+   * Get all credentials for a client (used by tools services)
+   * @param {string} clientId - Client ObjectId
+   * @returns {Promise<Object>} All client credentials by provider
+   */
+  static async getClientCredentials(clientId) {
+    try {
+      console.log(`🔍 Getting all credentials for client: ${clientId}`);
+
+      const collection = await this.getCollection();
+
+      // Get all active credentials for this client
+      const credentialRecords = await collection.find({
+        clientId: new ObjectId(clientId),
+        isActive: true
+      }).toArray();
+
+      console.log(`🔍 Found ${credentialRecords.length} credential records`);
+
+      const allCredentials = {};
+
+      // Process each provider's credentials
+      for (const record of credentialRecords) {
+        const decryptedCredentials = {};
+
+        // Decrypt all credential fields
+        for (const [key, value] of Object.entries(record.credentials || {})) {
+          decryptedCredentials[key] = this.decrypt(value);
+        }
+
+        allCredentials[record.provider] = decryptedCredentials;
+        console.log(`✅ Added ${record.provider} credentials for client ${clientId}`);
+      }
+
+      return allCredentials;
+
+    } catch (error) {
+      console.error('❌ Error getting client credentials:', error);
+      return {};
+    }
+  }
+
+  /**
    * Get system default credentials
    * @param {string} provider - Provider name
    * @param {string} clientId - Client ID for logging
@@ -389,8 +431,12 @@ class TelephonyCredentialsService {
         authToken: process.env.TWILIO_AUTH_TOKEN || 'default_token'
       },
       wati: {
-        accessToken: process.env.WATI_ACCESS_TOKEN || 'default_wati_token',
-        instanceId: process.env.WATI_INSTANCE_ID || 'default_instance'
+        wati_api_key: process.env.WATI_API_KEY || 'default_wati_key',
+        wati_instance_id: process.env.WATI_INSTANCE_ID || 'default_instance'
+      },
+      email: {
+        gmail_user: process.env.GMAIL_USER || 'default@gmail.com',
+        gmail_password: process.env.GMAIL_PASSWORD || 'default_password'
       }
     };
     

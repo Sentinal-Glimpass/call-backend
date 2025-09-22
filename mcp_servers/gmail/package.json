@@ -1,0 +1,17 @@
+{
+  "name": "gmail-mcp-server",
+  "version": "1.0.0",
+  "description": "MCP Server for Gmail/SMTP email integration",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.0.0",
+    "axios": "^1.6.0",
+    "nodemailer": "^6.9.0",
+    "dotenv": "^16.3.1"
+  },
+  "keywords": ["mcp", "gmail", "email", "smtp"],
+  "author": "Glimpass Tools API"
+}

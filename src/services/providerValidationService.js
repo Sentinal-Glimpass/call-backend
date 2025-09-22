@@ -6,6 +6,7 @@
 
 const twilio = require('twilio');
 const axios = require('axios');
+const nodemailer = require('nodemailer');
 
 class ProviderValidationService {
   
@@ -300,7 +301,80 @@ class ProviderValidationService {
       };
     }
   }
-  
+
+  /**
+   * Test Gmail credentials by testing SMTP and IMAP connections
+   * @param {Object} credentials - Gmail credentials
+   * @returns {Promise<Object>} Validation result
+   */
+  static async validateGmailCredentials(credentials) {
+    const startTime = Date.now();
+
+    try {
+      const { gmail_user, gmail_password } = credentials;
+
+      if (!gmail_user || !gmail_password) {
+        return {
+          valid: false,
+          error: 'Missing gmail_user or gmail_password',
+          details: {
+            gmail_user: !!gmail_user,
+            gmail_password: !!gmail_password
+          }
+        };
+      }
+
+      console.log(`📧 Testing Gmail credentials for: ${gmail_user}`);
+
+      // Test 1: SMTP connection (for sending emails)
+      let smtpVerified = false;
+      try {
+        const transporter = nodemailer.createTransport({
+          service: 'gmail',
+          auth: {
+            user: gmail_user,
+            pass: gmail_password
+          }
+        });
+
+        await transporter.verify();
+        smtpVerified = true;
+        console.log(`✅ Gmail SMTP connection verified`);
+      } catch (error) {
+        console.error(`❌ Gmail SMTP verification failed:`, error.message);
+        return {
+          valid: false,
+          error: `Invalid Gmail SMTP credentials: ${error.message}`,
+          testDuration: Date.now() - startTime
+        };
+      }
+
+      // For Gmail validation, SMTP verification is sufficient for most use cases
+      // IMAP testing can be added later with a proper Node.js IMAP library if needed
+      console.log(`✅ Gmail SMTP authentication successful for ${gmail_user}`);
+
+      return {
+        valid: true,
+        account: {
+          email: gmail_user,
+          smtp_verified: smtpVerified,
+          name: 'Gmail Account',
+          provider: 'gmail'
+        },
+        testDuration: Date.now() - startTime,
+        testedAt: new Date().toISOString()
+      };
+
+    } catch (error) {
+      console.error('❌ Gmail validation error:', error);
+      return {
+        valid: false,
+        error: `Gmail validation failed: ${error.message}`,
+        testDuration: Date.now() - startTime
+      };
+    }
+  }
+
   /**
    * Validate credentials for any provider
    * @param {string} provider - Provider name
@@ -319,7 +393,11 @@ class ProviderValidationService {
         
       case 'wati':
         return await this.validateWatiCredentials(credentials);
-        
+
+      case 'gmail':
+      case 'email':
+        return await this.validateGmailCredentials(credentials);
+
       default:
         return {
           valid: false,
@@ -349,6 +427,14 @@ class ProviderValidationService {
       wati: [
         'Instance authentication',
         'Business profile fetching'
+      ],
+      gmail: [
+        'SMTP authentication',
+        'Gmail server connectivity'
+      ],
+      email: [
+        'SMTP authentication',
+        'Gmail server connectivity'
       ]
     };
     

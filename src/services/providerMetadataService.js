@@ -132,13 +132,13 @@ class ProviderMetadataService {
       wati: {
         name: "wati",
         displayName: "WATI WhatsApp Business API",
-        description: "WhatsApp Business messaging via WATI platform", 
+        description: "WhatsApp Business messaging via WATI platform",
         isDefault: false,
         capabilities: ["whatsapp"],
         category: "messaging",
         logoUrl: "/assets/providers/wati-logo.svg",
         docsUrl: "https://documenter.getpostman.com/view/2712925/SzYUagbA",
-        
+
         requiredFields: [
           {
             key: "accessToken",
@@ -152,35 +152,55 @@ class ProviderMetadataService {
             order: 1
           }
         ],
-        
+
+        optionalFields: []
+      },
+
+      gmail: {
+        name: "gmail",
+        displayName: "Gmail SMTP",
+        description: "Email messaging via Gmail SMTP",
+        isDefault: false,
+        capabilities: ["email"],
+        category: "messaging",
+        logoUrl: "/assets/providers/gmail-logo.svg",
+        docsUrl: "https://support.google.com/mail/answer/7126229",
+
+        requiredFields: [
+          {
+            key: "gmail_user",
+            label: "Email Address",
+            type: "email",
+            placeholder: "your-email@gmail.com or your-email@yourdomain.com",
+            validation: {
+              pattern: "^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\\.[a-zA-Z]{2,}$",
+              message: "Must be a valid email address"
+            },
+            helpText: "Your Gmail or Google Workspace email address",
+            order: 1
+          },
+          {
+            key: "gmail_password",
+            label: "App Password",
+            type: "password",
+            placeholder: "xxxx xxxx xxxx xxxx",
+            validation: {
+              minLength: 16,
+              message: "App password must be at least 16 characters"
+            },
+            helpText: "16-character app password generated from Gmail security settings",
+            order: 2
+          }
+        ],
+
         optionalFields: [
           {
-            key: "apiEndpoint",
-            label: "API Endpoint",
-            type: "url",
-            placeholder: "https://your-domain.wati.io/api/v1",
-            helpText: "Your WATI API endpoint URL from dashboard (leave empty to use default)",
-            order: 2
-          },
-          {
-            key: "instanceId", 
-            label: "Instance ID (Legacy)",
+            key: "from_name",
+            label: "From Name",
             type: "text",
-            placeholder: "your_instance_id",
-            validation: {
-              pattern: "^[a-zA-Z0-9_-]*$",
-              message: "Only alphanumeric characters, underscores, and hyphens allowed"
-            },
-            helpText: "Legacy instance ID - only needed for older WATI setups",
+            placeholder: "Your Business Name",
+            helpText: "Display name for outgoing emails (optional)",
             order: 3
-          },
-          {
-            key: "webhookUrl",
-            label: "Webhook URL",
-            type: "url",
-            placeholder: "https://your-domain.com/wati/webhook",
-            helpText: "URL for receiving WATI webhook notifications",
-            order: 4
           }
         ]
       }

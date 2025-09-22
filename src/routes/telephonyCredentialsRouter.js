@@ -47,7 +47,7 @@ const {
  *                 example: "507f1f77bcf86cd799439011"
  *               provider:
  *                 type: string
- *                 enum: [plivo, twilio]
+ *                 enum: [plivo, twilio, wati, email]
  *                 example: "twilio"
  *               accountSid:
  *                 type: string
