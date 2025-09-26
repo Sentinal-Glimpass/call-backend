@@ -13,9 +13,6 @@ COPY package*.json ./
 # Install dependencies (including dev dependencies for babel)
 RUN npm ci --include=dev
 
-# Install babel dependencies globally for production
-RUN npm install -g @babel/node @babel/core
-
 # Copy application code
 COPY . .
 

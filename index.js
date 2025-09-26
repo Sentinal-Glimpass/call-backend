@@ -157,7 +157,6 @@ app.use((req, res, next) => {
     console.log(`Client IP: ${clientIp}`);
     next();
 });
-app.use(bodyParser.json());
 
 // Apply rate limiting to all API routes - REMOVED
 // app.use(apiLimiter);
