@@ -53,9 +53,34 @@ const { getAgentMcpTools } = require('../services/tools/mcpService');
 router.post('/wati/:agentId', authenticateSuperKey, auditLog, async (req, res) => {
   try {
     const { agentId } = req.params;
-    const mcpRequest = req.body;
+    let mcpRequest = req.body;
 
     console.log(`🔌 WATI MCP HTTP request for agent: ${agentId}`);
+    console.log(`🔍 Raw request body:`, JSON.stringify(req.body, null, 2));
+    console.log(`🔍 Request headers:`, JSON.stringify(req.headers, null, 2));
+
+    // Handle potential body parsing issues in production
+    if (typeof mcpRequest === 'string') {
+      try {
+        mcpRequest = JSON.parse(mcpRequest);
+        console.log(`✅ Parsed string body to JSON`);
+      } catch (parseError) {
+        console.error(`❌ Failed to parse string body:`, parseError);
+        return res.status(400).json({
+          error: 'Invalid JSON in request body',
+          code: -32700 // JSON-RPC parse error
+        });
+      }
+    }
+
+    // Additional validation for empty or null request
+    if (!mcpRequest || typeof mcpRequest !== 'object') {
+      console.error(`❌ Invalid request body type:`, typeof mcpRequest);
+      return res.status(400).json({
+        error: 'Request body must be a valid JSON object',
+        code: -32700 // JSON-RPC parse error
+      });
+    }
 
     // Get agent's WATI tool assignments to determine client context
     const agentTools = await getAgentWatiTools(agentId);
@@ -124,9 +149,33 @@ router.post('/wati/:agentId', authenticateSuperKey, auditLog, async (req, res) =
 router.post('/gmail/:agentId', authenticateSuperKey, auditLog, async (req, res) => {
   try {
     const { agentId } = req.params;
-    const mcpRequest = req.body;
+    let mcpRequest = req.body;
 
     console.log(`🔌 Gmail MCP HTTP request for agent: ${agentId}`);
+    console.log(`🔍 Raw request body:`, JSON.stringify(req.body, null, 2));
+
+    // Handle potential body parsing issues in production
+    if (typeof mcpRequest === 'string') {
+      try {
+        mcpRequest = JSON.parse(mcpRequest);
+        console.log(`✅ Parsed string body to JSON`);
+      } catch (parseError) {
+        console.error(`❌ Failed to parse string body:`, parseError);
+        return res.status(400).json({
+          error: 'Invalid JSON in request body',
+          code: -32700 // JSON-RPC parse error
+        });
+      }
+    }
+
+    // Additional validation for empty or null request
+    if (!mcpRequest || typeof mcpRequest !== 'object') {
+      console.error(`❌ Invalid request body type:`, typeof mcpRequest);
+      return res.status(400).json({
+        error: 'Request body must be a valid JSON object',
+        code: -32700 // JSON-RPC parse error
+      });
+    }
 
     // Get agent's email tool assignments
     const agentTools = await getAgentEmailTools(agentId);
@@ -201,9 +250,33 @@ router.post('/gmail/:agentId', authenticateSuperKey, auditLog, async (req, res) 
 router.post('/generic/:agentId/:toolId', authenticateSuperKey, auditLog, async (req, res) => {
   try {
     const { agentId, toolId } = req.params;
-    const mcpRequest = req.body;
+    let mcpRequest = req.body;
 
     console.log(`🔌 Generic MCP HTTP proxy for agent: ${agentId}, tool: ${toolId}`);
+    console.log(`🔍 Raw request body:`, JSON.stringify(req.body, null, 2));
+
+    // Handle potential body parsing issues in production
+    if (typeof mcpRequest === 'string') {
+      try {
+        mcpRequest = JSON.parse(mcpRequest);
+        console.log(`✅ Parsed string body to JSON`);
+      } catch (parseError) {
+        console.error(`❌ Failed to parse string body:`, parseError);
+        return res.status(400).json({
+          error: 'Invalid JSON in request body',
+          code: -32700 // JSON-RPC parse error
+        });
+      }
+    }
+
+    // Additional validation for empty or null request
+    if (!mcpRequest || typeof mcpRequest !== 'object') {
+      console.error(`❌ Invalid request body type:`, typeof mcpRequest);
+      return res.status(400).json({
+        error: 'Request body must be a valid JSON object',
+        code: -32700 // JSON-RPC parse error
+      });
+    }
 
     // Get agent's MCP tool assignments
     const agentTools = await getAgentMcpTools(agentId);

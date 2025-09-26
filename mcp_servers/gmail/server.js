@@ -151,14 +151,41 @@ class GmailMCPServer extends BaseMCPServer {
     try {
       console.log('🔌 Processing Gmail MCP HTTP request:', JSON.stringify(mcpRequest, null, 2));
 
-      // Validate JSON-RPC 2.0 format
-      if (!mcpRequest.jsonrpc || mcpRequest.jsonrpc !== '2.0') {
+      // Handle potential parsing issues
+      if (!mcpRequest || typeof mcpRequest !== 'object') {
+        console.error('❌ Gmail MCP: Invalid request - not an object');
+        return {
+          jsonrpc: '2.0',
+          id: 0,
+          error: {
+            code: -32700,
+            message: 'Parse error - invalid request object'
+          }
+        };
+      }
+
+      // Validate JSON-RPC 2.0 format with more detailed logging
+      if (!mcpRequest.jsonrpc) {
+        console.error('❌ Gmail MCP: Missing jsonrpc field');
+        console.error('❌ Available fields:', Object.keys(mcpRequest));
         return {
           jsonrpc: '2.0',
           id: mcpRequest.id !== undefined ? mcpRequest.id : 0,
           error: {
             code: -32600,
-            message: 'Invalid Request - missing or invalid jsonrpc field'
+            message: 'Invalid Request - missing jsonrpc field'
+          }
+        };
+      }
+
+      if (mcpRequest.jsonrpc !== '2.0') {
+        console.error('❌ Gmail MCP: Invalid jsonrpc version:', mcpRequest.jsonrpc);
+        return {
+          jsonrpc: '2.0',
+          id: mcpRequest.id !== undefined ? mcpRequest.id : 0,
+          error: {
+            code: -32600,
+            message: `Invalid Request - jsonrpc must be "2.0", got "${mcpRequest.jsonrpc}"`
           }
         };
       }
