@@ -114,29 +114,22 @@ const corsOptions = {
 
 app.use(cors(corsOptions));
 
-// Raw body capture middleware for MCP endpoints debugging
+// Debug middleware for MCP endpoints (non-consuming)
 app.use('/mcp', (req, res, next) => {
-  console.log(`🔬 [RAW CAPTURE] ${req.method} ${req.path}`);
-  console.log(`🔬 [RAW CAPTURE] Content-Length: ${req.headers['content-length']}`);
-  console.log(`🔬 [RAW CAPTURE] Content-Type: ${req.headers['content-type']}`);
+  console.log(`🔬 [DEBUG] ${req.method} ${req.path}`);
+  console.log(`🔬 [DEBUG] Content-Length: ${req.headers['content-length']}`);
+  console.log(`🔬 [DEBUG] Content-Type: ${req.headers['content-type']}`);
 
-  let rawBody = '';
-  req.setEncoding('utf8');
+  // Check for duplicate content-type headers
+  const contentType = req.headers['content-type'];
+  if (contentType && contentType.includes(',')) {
+    console.log(`⚠️ [DEBUG] DUPLICATE Content-Type detected: ${contentType}`);
+    // Fix the duplicate content-type header
+    req.headers['content-type'] = 'application/json';
+    console.log(`✅ [DEBUG] Fixed Content-Type to: ${req.headers['content-type']}`);
+  }
 
-  req.on('data', (chunk) => {
-    console.log(`🔬 [RAW CAPTURE] Received chunk: ${chunk.length} bytes`);
-    console.log(`🔬 [RAW CAPTURE] Chunk content: ${JSON.stringify(chunk)}`);
-    rawBody += chunk;
-  });
-
-  req.on('end', () => {
-    console.log(`🔬 [RAW CAPTURE] Total raw body: ${JSON.stringify(rawBody)}`);
-    console.log(`🔬 [RAW CAPTURE] Raw body length: ${rawBody.length}`);
-    req.rawBodyContent = rawBody;
-
-    // Continue to next middleware
-    next();
-  });
+  next();
 });
 
 app.use(express.urlencoded({ limit: '50mb', extended: true }));  // For URL-encoded data
