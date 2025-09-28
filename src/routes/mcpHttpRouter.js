@@ -56,8 +56,25 @@ router.post('/wati/:agentId', authenticateSuperKey, auditLog, async (req, res) =
     let mcpRequest = req.body;
 
     console.log(`🔌 WATI MCP HTTP request for agent: ${agentId}`);
+    console.log(`📊 Request method: ${req.method}`);
+    console.log(`📊 Content-Length header: ${req.headers['content-length']}`);
+    console.log(`📊 Content-Type header: ${req.headers['content-type']}`);
     console.log(`🔍 Raw request body:`, JSON.stringify(req.body, null, 2));
+    console.log(`🔍 Request body type: ${typeof req.body}`);
+    console.log(`🔍 Request body constructor: ${req.body?.constructor?.name}`);
+    console.log(`🔍 Request body keys: ${Object.keys(req.body || {})}`);
     console.log(`🔍 Request headers:`, JSON.stringify(req.headers, null, 2));
+
+    // Check if req.rawBody or other properties exist
+    if (req.rawBody) {
+      console.log(`🔍 Raw body buffer: ${req.rawBody.toString()}`);
+    }
+    if (req.rawBodyContent) {
+      console.log(`🔍 Raw body content from middleware: ${JSON.stringify(req.rawBodyContent)}`);
+    }
+    if (req._body !== undefined) {
+      console.log(`🔍 Express _body flag: ${req._body}`);
+    }
 
     // Handle potential body parsing issues in production
     if (typeof mcpRequest === 'string') {
@@ -152,7 +169,16 @@ router.post('/gmail/:agentId', authenticateSuperKey, auditLog, async (req, res) 
     let mcpRequest = req.body;
 
     console.log(`🔌 Gmail MCP HTTP request for agent: ${agentId}`);
+    console.log(`📊 Gmail - Content-Length: ${req.headers['content-length']}`);
+    console.log(`📊 Gmail - Content-Type: ${req.headers['content-type']}`);
     console.log(`🔍 Raw request body:`, JSON.stringify(req.body, null, 2));
+    console.log(`🔍 Gmail body type: ${typeof req.body}`);
+    console.log(`🔍 Gmail body keys: ${Object.keys(req.body || {})}`);
+
+    // Check if req.rawBody exists for Gmail too
+    if (req.rawBody) {
+      console.log(`🔍 Gmail raw body buffer: ${req.rawBody.toString()}`);
+    }
 
     // Handle potential body parsing issues in production
     if (typeof mcpRequest === 'string') {

@@ -274,6 +274,14 @@ const auditLog = async (req, res, next) => {
 // Super Key Authentication middleware (for admin and bot operations)
 const authenticateSuperKey = (req, res, next) => {
   try {
+    // Debug logging for MCP endpoints
+    if (req.path.includes('/mcp/')) {
+      console.log(`🔐 [AUTH MIDDLEWARE] Path: ${req.path}`);
+      console.log(`🔐 [AUTH MIDDLEWARE] Body at auth: ${JSON.stringify(req.body)}`);
+      console.log(`🔐 [AUTH MIDDLEWARE] Body type: ${typeof req.body}`);
+      console.log(`🔐 [AUTH MIDDLEWARE] Content-Length: ${req.headers['content-length']}`);
+    }
+
     const authHeader = req.headers['authorization'];
     const token = authHeader && authHeader.split(' ')[1]; // Bearer TOKEN
 
