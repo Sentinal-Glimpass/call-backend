@@ -43,31 +43,49 @@ async function getMcpTools(clientId, filters = {}) {
  * Validate MCP configuration
  */
 function validateMcpConfig(mcpConfig) {
+  // Handle MCP client configuration with multiple servers
+  if (mcpConfig.mcpServers && typeof mcpConfig.mcpServers === 'object') {
+    // This is a client configuration with multiple servers
+    for (const [serverName, serverConfig] of Object.entries(mcpConfig.mcpServers)) {
+      validateSingleMcpServer(serverConfig, serverName);
+    }
+    return true;
+  }
+
+  // Handle single MCP server configuration
+  validateSingleMcpServer(mcpConfig, 'server');
+  return true;
+}
+
+/**
+ * Validate a single MCP server configuration
+ */
+function validateSingleMcpServer(serverConfig, serverName) {
   // Check if it has required fields for MCP server
-  if (!mcpConfig.command && !mcpConfig.name) {
-    throw new Error('MCP config must have either "command" or "name" field');
+  if (!serverConfig.command && !serverConfig.name) {
+    throw new Error(`MCP server "${serverName}" must have either "command" or "name" field`);
   }
 
   // If it has command, validate command structure
-  if (mcpConfig.command) {
-    if (typeof mcpConfig.command !== 'string') {
-      throw new Error('MCP config "command" must be a string');
+  if (serverConfig.command) {
+    if (typeof serverConfig.command !== 'string') {
+      throw new Error(`MCP server "${serverName}" - "command" must be a string`);
     }
 
     // If args provided, must be array
-    if (mcpConfig.args && !Array.isArray(mcpConfig.args)) {
-      throw new Error('MCP config "args" must be an array');
+    if (serverConfig.args && !Array.isArray(serverConfig.args)) {
+      throw new Error(`MCP server "${serverName}" - "args" must be an array`);
     }
 
     // If env provided, must be object
-    if (mcpConfig.env && typeof mcpConfig.env !== 'object') {
-      throw new Error('MCP config "env" must be an object');
+    if (serverConfig.env && typeof serverConfig.env !== 'object') {
+      throw new Error(`MCP server "${serverName}" - "env" must be an object`);
     }
   }
 
   // For transport configuration
-  if (mcpConfig.transport && typeof mcpConfig.transport !== 'object') {
-    throw new Error('MCP config "transport" must be an object');
+  if (serverConfig.transport && typeof serverConfig.transport !== 'object') {
+    throw new Error(`MCP server "${serverName}" - "transport" must be an object`);
   }
 
   return true;
@@ -379,15 +397,39 @@ async function assignMcpToolToAgent(agentId, clientId, assignmentData) {
     await connectToMongo();
     const db = client.db('glimpass');
 
-    const { mcp_tool_id, enabled = true, conditions_override, parameters_override } = assignmentData;
+    const { mcp_tool_id, tool_id, enabled = true, conditions_override, parameters_override } = assignmentData;
+
+    // Accept both mcp_tool_id and tool_id for frontend compatibility
+    const toolId = mcp_tool_id || tool_id;
+
+    if (!toolId) {
+      return {
+        success: false,
+        status: 400,
+        message: 'Tool ID is required (mcp_tool_id or tool_id)'
+      };
+    }
+
+    console.log(`[DEBUG] Looking for MCP tool with ID: ${toolId}, clientId: ${clientId}`);
 
     // Verify tool exists
     const tool = await db.collection('mcpTools').findOne({
-      _id: new ObjectId(mcp_tool_id),
+      _id: new ObjectId(toolId),
       client_id: clientId
     });
 
+    console.log(`[DEBUG] Tool found:`, tool ? 'YES' : 'NO');
+
     if (!tool) {
+      // Additional debugging - check if tool exists without client_id filter
+      const toolWithoutClient = await db.collection('mcpTools').findOne({
+        _id: new ObjectId(toolId)
+      });
+      console.log(`[DEBUG] Tool exists without client filter:`, toolWithoutClient ? 'YES' : 'NO');
+      if (toolWithoutClient) {
+        console.log(`[DEBUG] Tool's client_id:`, toolWithoutClient.client_id);
+      }
+
       return {
         success: false,
         status: 404,
@@ -398,7 +440,7 @@ async function assignMcpToolToAgent(agentId, clientId, assignmentData) {
     // Check if already assigned
     const existingAssignment = await db.collection('agentMcpTools').findOne({
       agent_id: agentId,
-      'assigned_tools.mcp_tool_id': mcp_tool_id
+      'assigned_tools.mcp_tool_id': toolId
     });
 
     if (existingAssignment) {
@@ -411,7 +453,7 @@ async function assignMcpToolToAgent(agentId, clientId, assignmentData) {
 
     // Create assignment
     const assignment = {
-      mcp_tool_id,
+      mcp_tool_id: toolId,
       enabled,
       conditions_override: conditions_override || [],
       parameters_override: parameters_override || {}
