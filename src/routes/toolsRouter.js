@@ -312,7 +312,7 @@ router.delete('/registry/:toolName', authenticateToken, auditLog, async (req, re
  */
 router.post('/configs', authenticateToken, auditLog, async (req, res) => {
   try {
-    const clientId = req.clientData._id.toString();
+    const clientId = req.user.clientId;
     const configData = { ...req.body, client_id: clientId };
     
     const result = await createClientToolConfig(configData);
@@ -350,7 +350,7 @@ router.post('/configs', authenticateToken, auditLog, async (req, res) => {
  */
 router.get('/configs', authenticateToken, auditLog, async (req, res) => {
   try {
-    const clientId = req.clientData._id.toString();
+    const clientId = req.user.clientId;
     const filters = { 
       client_id: clientId,
       ...req.query 
@@ -389,7 +389,7 @@ router.get('/configs', authenticateToken, auditLog, async (req, res) => {
 router.get('/configs/:configId', authenticateToken, auditLog, async (req, res) => {
   try {
     const { configId } = req.params;
-    const clientId = req.clientData._id.toString();
+    const clientId = req.user.clientId;
     
     const result = await getClientToolConfigById(configId, clientId);
     res.status(result.status).json(result);
@@ -424,7 +424,7 @@ router.get('/configs/:configId', authenticateToken, auditLog, async (req, res) =
 router.put('/configs/:configId', authenticateToken, auditLog, async (req, res) => {
   try {
     const { configId } = req.params;
-    const clientId = req.clientData._id.toString();
+    const clientId = req.user.clientId;
     const updateData = req.body;
     
     const result = await updateClientToolConfig(configId, clientId, updateData);
@@ -460,7 +460,7 @@ router.put('/configs/:configId', authenticateToken, auditLog, async (req, res) =
 router.delete('/configs/:configId', authenticateToken, auditLog, async (req, res) => {
   try {
     const { configId } = req.params;
-    const clientId = req.clientData._id.toString();
+    const clientId = req.user.clientId;
     
     const result = await deleteClientToolConfig(configId, clientId);
     res.status(result.status).json(result);
@@ -514,7 +514,7 @@ router.delete('/configs/:configId', authenticateToken, auditLog, async (req, res
  */
 router.get('/schemas', authenticateToken, auditLog, async (req, res) => {
   try {
-    const clientId = req.clientData._id.toString();
+    const clientId = req.user.clientId;
     const context = req.query;
     
     const result = await getToolsSchemas(clientId, context);
@@ -567,7 +567,7 @@ router.get('/schemas', authenticateToken, auditLog, async (req, res) => {
  */
 router.post('/execute', authenticateToken, auditLog, async (req, res) => {
   try {
-    const clientId = req.clientData._id.toString();
+    const clientId = req.user.clientId;
     const { function_name, arguments: functionArgs, config_id, context } = req.body;
     
     const executionData = {
@@ -699,7 +699,7 @@ router.post('/validate-config', authenticateToken, auditLog, async (req, res) =>
 router.get('/wati/templates', authenticateToken, auditLog, async (req, res) => {
   try {
     // Get client ID from JWT token instead of URL parameter
-    const clientId = req.clientData._id.toString();
+    const clientId = req.user.clientId;
     const { language, category, status } = req.query;
     
     const result = await getWatiTemplates(clientId, { language, category, status });
@@ -730,7 +730,7 @@ router.get('/wati/templates', authenticateToken, auditLog, async (req, res) => {
 router.get('/wati/tools', authenticateToken, auditLog, async (req, res) => {
   try {
     // Get client ID from JWT token instead of URL parameter
-    const clientId = req.clientData._id.toString();
+    const clientId = req.user.clientId;
 
     // Filter for WATI tools only - pass client_id in filters
     const result = await getClientToolConfigs({
@@ -784,7 +784,7 @@ router.get('/wati/tools', authenticateToken, auditLog, async (req, res) => {
 router.post('/wati/tools', authenticateToken, auditLog, async (req, res) => {
   try {
     // Get client ID from JWT token instead of URL parameter
-    const clientId = req.clientData._id.toString();
+    const clientId = req.user.clientId;
     const { templateName, toolName, description, enabled = true } = req.body;
     
     if (!templateName) {
@@ -922,7 +922,7 @@ router.post('/wati/tools', authenticateToken, auditLog, async (req, res) => {
 router.put('/wati/tools/:toolId', authenticateToken, auditLog, async (req, res) => {
   try {
     // Get client ID from JWT token instead of URL parameter
-    const clientId = req.clientData._id.toString();
+    const clientId = req.user.clientId;
     const { toolId } = req.params;
     const updates = req.body;
     
@@ -962,7 +962,7 @@ router.put('/wati/tools/:toolId', authenticateToken, auditLog, async (req, res) 
 router.delete('/wati/tools/:toolId', authenticateToken, auditLog, async (req, res) => {
   try {
     // Get client ID from JWT token instead of URL parameter
-    const clientId = req.clientData._id.toString();
+    const clientId = req.user.clientId;
     const { toolId } = req.params;
     
     const result = await deleteClientToolConfig(toolId, clientId);
