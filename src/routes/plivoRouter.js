@@ -3474,19 +3474,31 @@ router.get('/check-scheduled-campaigns', async(req, res) => {
     // Start each scheduled campaign
     for (const campaign of scheduledCampaigns) {
       try {
+        console.log(`🚀 ======================================`);
         console.log(`🚀 Starting scheduled campaign: ${campaign.campaignName} (ID: ${campaign._id})`);
         console.log(`   ⏰ Was scheduled for: ${campaign.scheduledTime}`);
+        console.log(`   📋 Campaign details:`, JSON.stringify({
+          campaignId: campaign._id,
+          listId: campaign.listId,
+          fromNumber: campaign.fromNumber,
+          clientId: campaign.clientId,
+          provider: campaign.provider,
+          wssUrl: campaign.wssUrl?.substring(0, 50) + '...'
+        }, null, 2));
 
         // Fetch list data for campaign
+        console.log(`   📥 Fetching list data for listId: ${campaign.listId}`);
         const listData = await getlistDataById(campaign.listId);
+        console.log(`   ✅ List data fetched: ${listData ? listData.length : 0} contacts`);
 
         if (!listData || listData.length === 0) {
           throw new Error('Campaign list is empty or not found');
         }
 
         // Update campaign status to "running" and set container info
+        console.log(`   🔄 Updating campaign status to "running"...`);
         const { CONTAINER_ID } = require('../../utils/containerLifecycle.js');
-        await campaignCollection.updateOne(
+        const updateResult = await campaignCollection.updateOne(
           { _id: campaign._id },
           {
             $set: {
@@ -3504,25 +3516,41 @@ router.get('/check-scheduled-campaigns', async(req, res) => {
             }
           }
         );
+        console.log(`   ✅ Campaign status updated: matched=${updateResult.matchedCount}, modified=${updateResult.modifiedCount}`);
 
         // Update client active campaign status
+        console.log(`   🔄 Updating client active campaign status...`);
         const clientCollection = database.collection("client");
-        await clientCollection.updateOne(
+        const clientUpdateResult = await clientCollection.updateOne(
           { _id: new ObjectId(campaign.clientId) },
           { $set: { isActiveCamp: 1, activeCampId: campaign._id.toString() } }
         );
+        console.log(`   ✅ Client status updated: matched=${clientUpdateResult.matchedCount}, modified=${clientUpdateResult.modifiedCount}`);
 
         // Start the campaign processing directly (don't call makeCallViaCampaign which creates a new campaign)
-        console.log(`🚀 Starting enhanced campaign processing: ${campaign.campaignName} (${campaign._id})`);
-        process.nextTick(() => processEnhancedCampaign(
-          campaign._id.toString(),
-          listData,
-          campaign.fromNumber,
-          campaign.wssUrl,
-          campaign.clientId,
-          campaign.listId,
-          campaign.provider
-        ));
+        console.log(`   🚀 Starting enhanced campaign processing: ${campaign.campaignName} (${campaign._id})`);
+        console.log(`   📞 Will process ${listData.length} contacts`);
+        console.log(`   🔧 Parameters:`, JSON.stringify({
+          campaignId: campaign._id.toString(),
+          contactsCount: listData.length,
+          fromNumber: campaign.fromNumber,
+          clientId: campaign.clientId,
+          listId: campaign.listId,
+          provider: campaign.provider
+        }, null, 2));
+
+        process.nextTick(() => {
+          console.log(`   ⚡ process.nextTick executing for campaign: ${campaign._id}`);
+          processEnhancedCampaign(
+            campaign._id.toString(),
+            listData,
+            campaign.fromNumber,
+            campaign.wssUrl,
+            campaign.clientId,
+            campaign.listId,
+            campaign.provider
+          );
+        });
 
         started.push({
           campaignId: campaign._id.toString(),
@@ -3530,10 +3558,14 @@ router.get('/check-scheduled-campaigns', async(req, res) => {
           scheduledTime: campaign.scheduledTime,
           actualStartTime: new Date().toISOString()
         });
-        console.log(`✅ Successfully started campaign: ${campaign.campaignName}`)
+        console.log(`✅ Successfully started campaign: ${campaign.campaignName}`);
+        console.log(`🚀 ======================================`);
 
       } catch (error) {
+        console.error(`❌ ======================================`);
         console.error(`❌ Failed to start campaign ${campaign.campaignName}:`, error.message);
+        console.error(`❌ Error stack:`, error.stack);
+        console.error(`❌ Campaign ID: ${campaign._id}`);
 
         // Mark campaign as failed
         await campaignCollection.updateOne(
@@ -3550,8 +3582,10 @@ router.get('/check-scheduled-campaigns', async(req, res) => {
         errors.push({
           campaignId: campaign._id.toString(),
           campaignName: campaign.campaignName,
-          error: error.message
+          error: error.message,
+          stack: error.stack
         });
+        console.error(`❌ ======================================`);
       }
     }
 
