@@ -591,12 +591,35 @@ router.post('/create-campaign', authenticateToken, validateResourceOwnership, va
     const campaignName = req.body.campaignName
     const clientId = req.body.clientId
     const provider = req.body.provider
+    const scheduledTime = req.body.scheduledTime || null  // Optional: ISO 8601 datetime string
+    const scheduledBy = req.body.scheduledBy || req.user?.id || null  // Optional: user who scheduled it
 
     if (!listId || !fromNumber || !wssUrl || !campaignName || !clientId) {
-      return res.status(400).json({ 
-          status: 400, 
-          message: "Please provide all required values: listId, fromNumber, wssUrl, campaignName, clientId." 
+      return res.status(400).json({
+          status: 400,
+          message: "Please provide all required values: listId, fromNumber, wssUrl, campaignName, clientId."
       });
+    }
+
+    // Validate scheduledTime if provided
+    if (scheduledTime) {
+      const scheduledDate = new Date(scheduledTime);
+      if (isNaN(scheduledDate.getTime())) {
+        return res.status(400).json({
+          status: 400,
+          message: "Invalid scheduledTime format. Please provide a valid ISO 8601 datetime string."
+        });
+      }
+
+      // Check if scheduled time is in the future
+      if (scheduledDate <= new Date()) {
+        return res.status(400).json({
+          status: 400,
+          message: "scheduledTime must be in the future."
+        });
+      }
+
+      console.log(`⏰ Campaign will be scheduled for: ${scheduledDate.toISOString()}`);
     }
     
     // Get provider and credentials info for logging
@@ -639,8 +662,8 @@ router.post('/create-campaign', authenticateToken, validateResourceOwnership, va
         console.warn(`⚠️ Could not determine provider info for campaign: ${providerError.message}`);
     }
     
-    console.log('🚀 Starting campaign via enhanced system...');
-    const result = await makeCallViaCampaign(listId, fromNumber, wssUrl, campaignName, clientId, provider)
+    console.log(scheduledTime ? '⏰ Scheduling campaign...' : '🚀 Starting campaign via enhanced system...');
+    const result = await makeCallViaCampaign(listId, fromNumber, wssUrl, campaignName, clientId, provider, scheduledTime, scheduledBy)
     let status = result.status || 200
     let message = result.message || "call scheduled"
     
@@ -3358,6 +3381,186 @@ router.get('/client-analytics/:clientId', authenticateToken, validateResourceOwn
       success: false,
       message: "Internal server error",
       error: error.message
+    });
+  }
+});
+
+/**
+ * @swagger
+ * /plivo/check-scheduled-campaigns:
+ *   get:
+ *     tags: [Plivo]
+ *     summary: Check and start scheduled campaigns (triggered by Cloud Scheduler)
+ *     description: Polls MongoDB for campaigns that are scheduled and due to start, then initiates them. Limits parallel campaign starts via MAX_CAMPAIGNS env variable.
+ *     responses:
+ *       200:
+ *         description: Scheduled campaigns check completed
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: true
+ *                 message:
+ *                   type: string
+ *                   example: "Started 3 scheduled campaigns"
+ *                 started:
+ *                   type: array
+ *                   items:
+ *                     type: object
+ *                     properties:
+ *                       campaignId:
+ *                         type: string
+ *                       campaignName:
+ *                         type: string
+ *                       scheduledTime:
+ *                         type: string
+ *                         format: date-time
+ *                 skipped:
+ *                   type: number
+ *                   description: Number of campaigns skipped due to MAX_CAMPAIGNS limit
+ *                 errors:
+ *                   type: array
+ *                   description: Any campaigns that failed to start
+ *       500:
+ *         description: Internal server error
+ */
+router.get('/check-scheduled-campaigns', async(req, res) => {
+  try {
+    console.log('⏰ Scheduled campaign check triggered at:', new Date().toISOString());
+
+    const { connectToMongo, client } = require('../../models/mongodb.js');
+    await connectToMongo();
+
+    const database = client.db("talkGlimpass");
+    const campaignCollection = database.collection("plivoCampaign");
+
+    // Get MAX_CAMPAIGNS limit from env (default to 5)
+    const maxCampaigns = parseInt(process.env.MAX_CAMPAIGNS) || 5;
+    console.log(`📊 MAX_CAMPAIGNS limit: ${maxCampaigns}`);
+
+    // Find scheduled campaigns that are due to start
+    const now = new Date();
+    const scheduledCampaigns = await campaignCollection
+      .find({
+        status: "scheduled",
+        scheduledTime: { $lte: now }
+      })
+      .sort({ scheduledTime: 1 }) // Start oldest scheduled first
+      .limit(maxCampaigns)
+      .toArray();
+
+    console.log(`📋 Found ${scheduledCampaigns.length} scheduled campaigns ready to start`);
+
+    if (scheduledCampaigns.length === 0) {
+      return res.status(200).json({
+        success: true,
+        message: 'No scheduled campaigns due to start',
+        started: [],
+        skipped: 0,
+        timestamp: now.toISOString()
+      });
+    }
+
+    const started = [];
+    const errors = [];
+
+    // Import the campaign starting function
+    const { makeCallViaCampaign } = require('../apps/plivo/plivo');
+
+    // Start each scheduled campaign
+    for (const campaign of scheduledCampaigns) {
+      try {
+        console.log(`🚀 Starting scheduled campaign: ${campaign.campaignName} (ID: ${campaign._id})`);
+        console.log(`   ⏰ Was scheduled for: ${campaign.scheduledTime}`);
+
+        // Update status to "running" BEFORE starting the campaign
+        await campaignCollection.updateOne(
+          { _id: campaign._id },
+          {
+            $set: {
+              status: "running",
+              actualStartTime: new Date(),
+              currentIndex: 0,
+              processedContacts: 0
+            },
+            $unset: {
+              scheduledTime: "",
+              scheduledBy: ""
+            }
+          }
+        );
+
+        // Start the campaign using existing logic
+        const result = await makeCallViaCampaign(
+          campaign.listId,
+          campaign.fromNumber,
+          campaign.wssUrl,
+          campaign.campaignName,
+          campaign.clientId,
+          campaign.provider
+        );
+
+        if (result.status === 200) {
+          started.push({
+            campaignId: campaign._id.toString(),
+            campaignName: campaign.campaignName,
+            scheduledTime: campaign.scheduledTime,
+            actualStartTime: new Date().toISOString()
+          });
+          console.log(`✅ Successfully started campaign: ${campaign.campaignName}`);
+        } else {
+          throw new Error(result.message || 'Failed to start campaign');
+        }
+
+      } catch (error) {
+        console.error(`❌ Failed to start campaign ${campaign.campaignName}:`, error.message);
+
+        // Mark campaign as failed
+        await campaignCollection.updateOne(
+          { _id: campaign._id },
+          {
+            $set: {
+              status: "failed",
+              failureReason: error.message,
+              failedAt: new Date()
+            }
+          }
+        );
+
+        errors.push({
+          campaignId: campaign._id.toString(),
+          campaignName: campaign.campaignName,
+          error: error.message
+        });
+      }
+    }
+
+    const response = {
+      success: true,
+      message: started.length > 0
+        ? `Started ${started.length} scheduled campaign(s)`
+        : 'No campaigns started',
+      started: started,
+      skipped: 0, // We limit via query, so no skipped
+      errors: errors.length > 0 ? errors : undefined,
+      timestamp: now.toISOString(),
+      maxCampaigns: maxCampaigns
+    };
+
+    console.log(`📊 Scheduled campaign check completed: ${started.length} started, ${errors.length} errors`);
+
+    res.status(200).json(response);
+
+  } catch (error) {
+    console.error('❌ Error in check-scheduled-campaigns:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Internal server error',
+      error: error.message,
+      timestamp: new Date().toISOString()
     });
   }
 });

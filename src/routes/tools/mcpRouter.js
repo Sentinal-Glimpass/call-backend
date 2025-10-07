@@ -412,13 +412,14 @@ router.post('/agents/:agentId/assign', authenticateJWTOrSuperKey, auditLog, asyn
 router.delete('/agents/:agentId/remove', authenticateJWTOrSuperKey, auditLog, async (req, res) => {
   try {
     const { agentId } = req.params;
-    const { tool_id } = req.query;
+    // Support tool_id from both query parameters and request body for flexibility
+    const tool_id = req.query.tool_id || req.body.tool_id;
 
     if (!tool_id) {
       return res.status(400).json({
         success: false,
         status: 400,
-        message: 'tool_id parameter is required'
+        message: 'tool_id parameter is required (in query or body)'
       });
     }
 

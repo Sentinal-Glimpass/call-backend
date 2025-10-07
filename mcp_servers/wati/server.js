@@ -29,29 +29,21 @@ class WATIMCPServer extends BaseMCPServer {
 
     try {
       // Get agent's WATI tool assignments and configurations
-      console.log(`🔍 Fetching WATI tools for agent: ${this.agentId}`);
       const response = await makeInternalAPIRequest(`/api/tools/wati/bot/${this.agentId}`, {
         method: 'GET'
       });
 
-      console.log(`📊 Bot endpoint response:`, JSON.stringify(response, null, 2));
-
       if (!response.success) {
-        console.error('❌ Bot endpoint returned success=false:', response);
+        console.error('❌ WATI MCP: Bot endpoint failed:', response.message);
         return;
       }
 
-      if (!response.wati_tools) {
-        console.error('❌ No wati_tools field in response:', Object.keys(response));
+      if (!response.wati_tools || response.wati_tools.length === 0) {
+        console.warn('⚠️ WATI MCP: No tools assigned to agent');
         return;
       }
 
-      if (response.wati_tools.length === 0) {
-        console.error('⚠️ wati_tools array is empty');
-        return;
-      }
-
-      console.log(`✅ Found ${response.wati_tools.length} WATI tools for agent`);
+      console.log(`✅ WATI MCP: Loaded ${response.wati_tools.length} tool(s) for agent ${this.agentId}`);
       this.toolConfigs = response.wati_tools;
 
       // Clear existing tools
@@ -61,9 +53,7 @@ class WATIMCPServer extends BaseMCPServer {
       }
 
       // Create a tool for each assigned tool configuration
-      console.log(`🔧 Starting tool registration for ${this.toolConfigs.length} tools`);
       for (const toolConfig of this.toolConfigs) {
-        console.log(`📝 Processing tool config:`, JSON.stringify(toolConfig, null, 2));
 
         const toolName = 'whatsapp_messenger';
         const description = 'Send a whatsapp message to the user';
@@ -80,24 +70,15 @@ class WATIMCPServer extends BaseMCPServer {
           required: ['recipient']
         };
 
-        // For now, use basic schema with just recipient
-        // Template variables can be added later when we have them in the tool config
-        console.log(`📋 Using basic schema for tool: ${toolConfig.tool_name}`);
-
-        console.log(`📋 Final input schema:`, JSON.stringify(inputSchema, null, 2));
-
         this.registerTool(
           toolName,
           description,
           inputSchema,
           this.sendTemplateMessageDynamic.bind(this, toolConfig)
         );
-
-        console.log(`✅ Successfully registered dynamic WATI tool: ${toolName} for tool_id: ${toolConfig.wati_tool_id}`);
       }
 
-      console.log(`🎯 Total tools registered: ${this.tools.size}`);
-      console.log(`🎯 Tool names:`, Array.from(this.tools.keys()));
+      console.log(`✅ WATI MCP: Registered ${this.tools.size} tool(s)`);
     } catch (error) {
       console.error('❌ Error setting up dynamic WATI tools:', error);
     }
@@ -113,7 +94,6 @@ class WATIMCPServer extends BaseMCPServer {
       validatePhoneNumber(recipient);
 
       // Get WATI credentials for the client using direct database access
-      console.log(`🔍 Getting WATI credentials for client: ${this.clientId}`);
       const credentials = await TelephonyCredentialsService.getCredentials(this.clientId, 'wati');
 
       if (!credentials.accessToken && !credentials.wati_api_key) {
@@ -122,29 +102,20 @@ class WATIMCPServer extends BaseMCPServer {
 
       let apiKey = credentials.accessToken || credentials.wati_api_key;
 
-      console.log(`🔑 API Key found: ${apiKey ? 'YES' : 'NO'}`);
-      console.log(`🔑 API Key preview: ${apiKey ? apiKey.substring(0, 20) + '...' : 'NONE'}`);
-
       // Extract tenant ID from JWT token for base URL
       let tenantId = '';
       try {
-        // Clean token for JWT parsing (remove Bearer prefix if present)
         const cleanToken = apiKey.startsWith('Bearer ') ? apiKey.substring(7) : apiKey;
-        console.log(`🎫 Clean token preview: ${cleanToken.substring(0, 20)}...`);
         const tokenPayload = JSON.parse(Buffer.from(cleanToken.split('.')[1], 'base64').toString());
         tenantId = tokenPayload.tenant_id;
-        console.log(`🏢 Extracted tenant ID: ${tenantId}`);
       } catch (e) {
-        console.log('❌ Could not extract tenant ID from token:', e.message);
-        console.log('🔄 Using default URL');
+        console.warn('⚠️ WATI MCP: Could not extract tenant ID from token');
       }
 
       // Build WATI API URL with tenant ID
       const baseUrl = tenantId
         ? `https://live-mt-server.wati.io/${tenantId}/api/v1`
         : 'https://live-mt-server.wati.io/api/v1';
-
-      console.log(`🌐 WATI API Base URL: ${baseUrl}`);
 
       // Format recipient (digits only, with country code)
       let formattedRecipient = recipient.replace(/\D/g, '');
@@ -175,18 +146,11 @@ class WATIMCPServer extends BaseMCPServer {
         parameters
       };
 
-      console.error(`📱 Sending WATI message to ${formattedRecipient} using template: ${templateName}`);
-      console.error(`📦 Payload:`, JSON.stringify(payload, null, 2));
+      console.log(`📱 WATI → Sending template "${templateName}" to ${formattedRecipient}`);
 
       // Send via WATI API using correct endpoint with query parameter
       const url = `${baseUrl}/sendTemplateMessage?whatsappNumber=${formattedRecipient}`;
-
       const authHeader = apiKey.startsWith('Bearer ') ? apiKey : `Bearer ${apiKey}`;
-
-      console.log(`🚀 Final API call:`);
-      console.log(`   URL: ${url}`);
-      console.log(`   Auth: ${authHeader.substring(0, 20)}...`);
-      console.log(`   Payload:`, JSON.stringify(payload, null, 2));
 
       const response = await axios.post(url, payload, {
         headers: {
@@ -195,7 +159,7 @@ class WATIMCPServer extends BaseMCPServer {
         }
       });
 
-      console.log(`✅ WATI API response:`, response.data);
+      console.log(`✅ WATI → Message sent successfully (ID: ${response.data.id || 'unknown'})`);
 
       return formatMCPResponse(true, {
         message_id: response.data.id || 'sent',
@@ -368,7 +332,6 @@ class WATIMCPServer extends BaseMCPServer {
   async setAgentContext(agentId, clientId) {
     this.agentId = agentId;
     this.clientId = clientId;
-    console.log(`🔌 WATI MCP Server context set: agentId=${agentId}, clientId=${clientId}`);
 
     // Setup dynamic tools based on agent assignments
     await this.setupDynamicTools();
@@ -376,7 +339,6 @@ class WATIMCPServer extends BaseMCPServer {
 
   async handleHttpRequest(mcpRequest) {
     try {
-      console.log('🔌 Processing WATI MCP HTTP request:', JSON.stringify(mcpRequest, null, 2));
 
       // Handle potential parsing issues
       if (!mcpRequest || typeof mcpRequest !== 'object') {
@@ -425,20 +387,15 @@ class WATIMCPServer extends BaseMCPServer {
           break;
 
         case 'notifications/initialized':
-          // Handle initialized notification (no response needed for notifications)
-          console.log('🔌 WATI MCP Server received initialized notification');
-          // JSON-RPC notifications don't expect a response - check if this is a notification
+          // JSON-RPC notifications don't expect a response
           if (mcpRequest.id === null || mcpRequest.id === undefined) {
-            // This is a notification, don't send any response
             return undefined;
-          } else {
-            // This shouldn't happen for notifications, but handle it gracefully
-            return {
-              jsonrpc: '2.0',
-              id: mcpRequest.id,
-              result: null
-            };
           }
+          return {
+            jsonrpc: '2.0',
+            id: mcpRequest.id,
+            result: null
+          };
 
         case 'tools/list':
           result = await this.handleToolsList();
@@ -491,8 +448,6 @@ class WATIMCPServer extends BaseMCPServer {
   }
 
   async handleInitialize(params) {
-    console.log('🔌 WATI MCP Server initialize called with params:', params);
-
     // Return MCP initialization response
     return {
       protocolVersion: '2024-11-05',

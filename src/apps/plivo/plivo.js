@@ -244,7 +244,7 @@ async function insertListContent(rows) {
   // }
   
 
-async function createCampaign(campaignName, listId, fromNumber, wssUrl, clientId, isBalanceUpdated, isCampaignCompleted, provider = null) {
+async function createCampaign(campaignName, listId, fromNumber, wssUrl, clientId, isBalanceUpdated, isCampaignCompleted, provider = null, scheduledTime = null, scheduledBy = null) {
   try {
     await connectToMongo();
     const database = client.db("talkGlimpass");
@@ -260,13 +260,17 @@ async function createCampaign(campaignName, listId, fromNumber, wssUrl, clientId
     // Calculate total contacts from the list
     const listDataCollection = database.collection("plivo-list-data");
     const totalContacts = await listDataCollection.countDocuments({ listId: new ObjectId(listId) });
-    
+
     // Use current container ID for Cloud Run tracking
     const { CONTAINER_ID } = require('../../utils/containerLifecycle.js');
     const containerId = CONTAINER_ID;
-    
-    // Insert the new campaign with enhanced fields for pause/resume functionality
-    const result = await collection.insertOne({
+
+    // Determine status based on scheduling
+    const isScheduled = scheduledTime !== null;
+    const campaignStatus = isScheduled ? "scheduled" : "running";
+
+    // Build campaign document
+    const campaignDoc = {
       // Original fields
       campaignName,
       listId,
@@ -276,28 +280,38 @@ async function createCampaign(campaignName, listId, fromNumber, wssUrl, clientId
       createdAt: new Date(),
       isBalanceUpdated,
       isCampaignCompleted,
-      
+
       // Provider-specific routing
       provider: provider,              // Explicit provider (twilio/plivo) or null for auto-detection
-      
+
       // Enhanced fields for pause/resume functionality
-      status: "running",           // "running", "paused", "completed", "cancelled"
+      status: campaignStatus,      // "scheduled", "running", "paused", "completed", "cancelled"
       currentIndex: 0,             // Current position in contact list
       totalContacts: totalContacts, // Total contacts from list
       processedContacts: 0,        // Number of contacts processed
-      
-      // Cloud Run heartbeat fields
-      heartbeat: new Date(),       // Last heartbeat timestamp
-      lastActivity: new Date(),    // Last processing activity
-      containerId: containerId,    // Container processing this campaign
-      
+
+      // Cloud Run heartbeat fields (only for running campaigns)
+      heartbeat: isScheduled ? null : new Date(),
+      lastActivity: isScheduled ? null : new Date(),
+      containerId: isScheduled ? null : containerId,
+
       // Pause/resume tracking
       pausedAt: null,              // When campaign was paused
       pausedBy: null,              // User who paused campaign
       resumedAt: null              // When campaign was resumed
-    });
+    };
 
-    console.log(`📊 Campaign created: ${campaignName} (${result.insertedId}) - ${totalContacts} contacts`);
+    // Add scheduling fields if scheduled
+    if (isScheduled) {
+      campaignDoc.scheduledTime = new Date(scheduledTime);
+      campaignDoc.scheduledBy = scheduledBy;
+      console.log(`⏰ Campaign scheduled: ${campaignName} for ${campaignDoc.scheduledTime.toISOString()}`);
+    }
+
+    // Insert the new campaign
+    const result = await collection.insertOne(campaignDoc);
+
+    console.log(`📊 Campaign created: ${campaignName} (${result.insertedId}) - ${totalContacts} contacts - Status: ${campaignStatus}`);
     return result.insertedId.toString();
   } catch (error) {
     console.error("❌ Error creating campaign:", error);
@@ -1225,20 +1239,20 @@ async function getSingleCampaignDetails(camp_id) {
 }
 
 
-async function makeCallViaCampaign(listId, fromNumber, wssUrl, campaignName, clientId, provider = null) {
+async function makeCallViaCampaign(listId, fromNumber, wssUrl, campaignName, clientId, provider = null, scheduledTime = null, scheduledBy = null) {
   try {
       const listData = await getlistDataById(listId);
       const contactCount = listData.length;
-      
+
       // Estimate campaign cost (average 30 seconds per call)
       const estimatedSecondsPerCall = parseInt(process.env.ESTIMATED_CALL_DURATION) || 30;
       const estimatedCost = contactCount * estimatedSecondsPerCall; // 1 second = 1 credit
-      
+
       console.log(`💰 Campaign cost estimation: ${contactCount} contacts × ${estimatedSecondsPerCall}s = ${estimatedCost} credits`);
-      
+
       // Validate client balance before creating campaign
       const balanceCheck = await validateClientBalance(clientId, estimatedCost);
-      
+
       if (!balanceCheck.canStart) {
           console.log(`❌ Campaign blocked: ${balanceCheck.message}`);
           return {
@@ -1249,7 +1263,7 @@ async function makeCallViaCampaign(listId, fromNumber, wssUrl, campaignName, cli
               contactCount: contactCount
           };
       }
-      
+
       if (!balanceCheck.canAfford) {
           console.log(`⚠️ Campaign warning: ${balanceCheck.message}`);
           // Allow campaign to start but warn about insufficient funds
@@ -1257,26 +1271,40 @@ async function makeCallViaCampaign(listId, fromNumber, wssUrl, campaignName, cli
       } else {
           console.log(`✅ Balance validation passed: ${balanceCheck.balance} credits available for ${estimatedCost} estimated cost`);
       }
-      
-      const result = await createCampaign(campaignName, listId, fromNumber, wssUrl, clientId, false, false, provider);
+
+      // Check if this is a scheduled campaign
+      const isScheduled = scheduledTime !== null;
+
+      const result = await createCampaign(campaignName, listId, fromNumber, wssUrl, clientId, false, false, provider, scheduledTime, scheduledBy);
       if (result === 0) {
           return { status: 500, message: 'Error while creating the campaign' };
       }
-      
+
       // Handle new error response format
       if (result && typeof result === 'object' && result.status) {
           return result;
       }
-      
+
+      // If scheduled, don't start the campaign - scheduler will handle it
+      if (isScheduled) {
+          console.log(`⏰ Campaign scheduled successfully: ${campaignName} (${result}) for ${new Date(scheduledTime).toISOString()}`);
+          return {
+              status: 200,
+              message: `Campaign scheduled successfully for ${new Date(scheduledTime).toISOString()}`,
+              campaignId: result,
+              scheduledTime: scheduledTime
+          };
+      }
+
       const database = client.db("talkGlimpass");
       const collection = database.collection("client");
-      
+
       // Update client active campaign status
       const clientResult = await collection.updateOne(
         { _id: new ObjectId(clientId) },
         { $set: { isActiveCamp: 1, activeCampId: result } }
       );
-      
+
       // Start enhanced campaign processing with pause/resume awareness
       console.log(`🚀 Starting enhanced campaign processing: ${campaignName} (${result})`);
       process.nextTick(() => processEnhancedCampaign(result, listData, fromNumber, wssUrl, clientId, listId, provider));
@@ -2254,8 +2282,8 @@ async function cancelCampaign(campaignId) {
     if (campaign.status === "failed") {
       return { success: false, error: "Cannot cancel failed campaign" };
     }
-    
-    if (!["running", "paused"].includes(campaign.status)) {
+
+    if (!["running", "paused", "scheduled"].includes(campaign.status)) {
       return { success: false, error: `Cannot cancel campaign with status: ${campaign.status}` };
     }
     

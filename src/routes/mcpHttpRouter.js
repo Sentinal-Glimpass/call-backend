@@ -55,57 +55,37 @@ router.post('/wati/:agentId', authenticateSuperKey, auditLog, async (req, res) =
     const { agentId } = req.params;
     let mcpRequest = req.body;
 
-    console.log(`🔌 WATI MCP HTTP request for agent: ${agentId}`);
-    console.log(`📊 Request method: ${req.method}`);
-    console.log(`📊 Content-Length header: ${req.headers['content-length']}`);
-    console.log(`📊 Content-Type header: ${req.headers['content-type']}`);
-    console.log(`🔍 Raw request body:`, JSON.stringify(req.body, null, 2));
-    console.log(`🔍 Request body type: ${typeof req.body}`);
-    console.log(`🔍 Request body constructor: ${req.body?.constructor?.name}`);
-    console.log(`🔍 Request body keys: ${Object.keys(req.body || {})}`);
-    console.log(`🔍 Request headers:`, JSON.stringify(req.headers, null, 2));
-
-    // Check if req.rawBody or other properties exist
-    if (req.rawBody) {
-      console.log(`🔍 Raw body buffer: ${req.rawBody.toString()}`);
-    }
-    if (req.rawBodyContent) {
-      console.log(`🔍 Raw body content from middleware: ${JSON.stringify(req.rawBodyContent)}`);
-    }
-    if (req._body !== undefined) {
-      console.log(`🔍 Express _body flag: ${req._body}`);
-    }
-
-    // Handle potential body parsing issues in production
+    // Handle potential body parsing issues
     if (typeof mcpRequest === 'string') {
       try {
         mcpRequest = JSON.parse(mcpRequest);
-        console.log(`✅ Parsed string body to JSON`);
       } catch (parseError) {
-        console.error(`❌ Failed to parse string body:`, parseError);
+        console.error(`❌ WATI MCP: Invalid JSON in request body`);
         return res.status(400).json({
           error: 'Invalid JSON in request body',
-          code: -32700 // JSON-RPC parse error
+          code: -32700
         });
       }
     }
 
-    // Additional validation for empty or null request
     if (!mcpRequest || typeof mcpRequest !== 'object') {
-      console.error(`❌ Invalid request body type:`, typeof mcpRequest);
+      console.error(`❌ WATI MCP: Invalid request body type`);
       return res.status(400).json({
         error: 'Request body must be a valid JSON object',
-        code: -32700 // JSON-RPC parse error
+        code: -32700
       });
     }
+
+    console.log(`🔌 WATI MCP: ${mcpRequest.method} → agent:${agentId}`);
 
     // Get agent's WATI tool assignments to determine client context
     const agentTools = await getAgentWatiTools(agentId);
 
     if (!agentTools.success || !agentTools.data.assigned_tools?.length) {
+      console.warn(`⚠️ WATI MCP: No tools assigned to agent ${agentId}`);
       return res.status(404).json({
         error: 'No WATI tools assigned to agent',
-        code: -32601 // JSON-RPC method not found
+        code: -32601
       });
     }
 
@@ -118,17 +98,17 @@ router.post('/wati/:agentId', authenticateSuperKey, auditLog, async (req, res) =
 
     // Handle notifications (no response expected)
     if (response === undefined || response === null) {
-      return res.status(200).end(); // Empty response for notifications
+      return res.status(200).end();
     }
 
     res.json(response);
 
   } catch (error) {
-    console.error('Error in WATI MCP HTTP handler:', error);
+    console.error('❌ WATI MCP HTTP handler error:', error.message);
     res.status(500).json({
       error: 'Internal server error',
       message: error.message,
-      code: -32603 // JSON-RPC internal error
+      code: -32603
     });
   }
 });

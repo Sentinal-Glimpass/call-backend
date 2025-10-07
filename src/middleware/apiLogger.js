@@ -164,32 +164,46 @@ function categorizeDuration(duration) {
 // Format and log to console
 function logToConsole(logEntry) {
   const { timestamp, method, path, statusCode, duration, user, ip } = logEntry;
-  
+
   // Color coding for status codes
   const statusColor = getStatusColor(statusCode);
   const durationColor = getDurationColor(logEntry.performance.category);
-  
+
+  // Check if this is an MCP endpoint - use compact logging
+  if (path.includes('/mcp/')) {
+    // Compact one-line format for MCP endpoints
+    const mcpMethod = logEntry.request.body?.method || 'unknown';
+    console.log(`🔌 MCP ${method} ${path} [${mcpMethod}] → ${statusCode} (${duration})`);
+
+    // Only log errors in detail for MCP
+    if (statusCode >= 400 || logEntry.performance.category === 'SLOW' || logEntry.performance.category === 'VERY_SLOW') {
+      console.log(`   ⚠️ Error/Slow: ${JSON.stringify(logEntry.response.data)}`);
+    }
+    return;
+  }
+
+  // Full detailed logging for non-MCP endpoints
   console.log('\n' + '='.repeat(80));
   console.log(`🕐 ${timestamp}`);
   console.log(`🌐 ${method} ${path} → ${statusColor}${statusCode}\x1b[0m (${durationColor}${duration}\x1b[0m)`);
   console.log(`📍 IP: ${ip} | User: ${user ? `${user.email} (${user.tokens} tokens)` : 'Anonymous'}`);
-  
+
   // Request details
   if (Object.keys(logEntry.request.query).length > 0) {
     console.log(`📝 Query: ${JSON.stringify(logEntry.request.query)}`);
   }
-  
+
   if (logEntry.request.body && Object.keys(logEntry.request.body).length > 0) {
     console.log(`📦 Request Body: ${JSON.stringify(logEntry.request.body, null, 2)}`);
   }
-  
+
   // Response details (truncated for readability)
   if (logEntry.response.data) {
     const responseStr = JSON.stringify(logEntry.response.data, null, 2);
     const truncated = responseStr.length > 500 ? responseStr.substring(0, 500) + '...' : responseStr;
     console.log(`📤 Response: ${truncated}`);
   }
-  
+
   // Performance and auth info
   console.log(`🔐 Auth: ${logEntry.auth.hasToken ? `✅ ${logEntry.auth.tokenType}` : '❌ No token'}`);
   console.log(`⚡ Performance: ${logEntry.performance.category} (${duration})`);
