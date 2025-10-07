@@ -3467,8 +3467,9 @@ router.get('/check-scheduled-campaigns', async(req, res) => {
     const started = [];
     const errors = [];
 
-    // Import the campaign starting function
-    const { makeCallViaCampaign } = require('../apps/plivo/plivo');
+    // Import the campaign processing function and data fetcher
+    const { getlistDataById, processEnhancedCampaign } = require('../apps/plivo/plivo');
+    const { ObjectId } = require('mongodb');
 
     // Start each scheduled campaign
     for (const campaign of scheduledCampaigns) {
@@ -3476,7 +3477,15 @@ router.get('/check-scheduled-campaigns', async(req, res) => {
         console.log(`🚀 Starting scheduled campaign: ${campaign.campaignName} (ID: ${campaign._id})`);
         console.log(`   ⏰ Was scheduled for: ${campaign.scheduledTime}`);
 
-        // Update status to "running" BEFORE starting the campaign
+        // Fetch list data for campaign
+        const listData = await getlistDataById(campaign.listId);
+
+        if (!listData || listData.length === 0) {
+          throw new Error('Campaign list is empty or not found');
+        }
+
+        // Update campaign status to "running" and set container info
+        const { CONTAINER_ID } = require('../../utils/containerLifecycle.js');
         await campaignCollection.updateOne(
           { _id: campaign._id },
           {
@@ -3484,7 +3493,10 @@ router.get('/check-scheduled-campaigns', async(req, res) => {
               status: "running",
               actualStartTime: new Date(),
               currentIndex: 0,
-              processedContacts: 0
+              processedContacts: 0,
+              heartbeat: new Date(),
+              lastActivity: new Date(),
+              containerId: CONTAINER_ID
             },
             $unset: {
               scheduledTime: "",
@@ -3493,27 +3505,32 @@ router.get('/check-scheduled-campaigns', async(req, res) => {
           }
         );
 
-        // Start the campaign using existing logic
-        const result = await makeCallViaCampaign(
-          campaign.listId,
-          campaign.fromNumber,
-          campaign.wssUrl,
-          campaign.campaignName,
-          campaign.clientId,
-          campaign.provider
+        // Update client active campaign status
+        const clientCollection = database.collection("client");
+        await clientCollection.updateOne(
+          { _id: new ObjectId(campaign.clientId) },
+          { $set: { isActiveCamp: 1, activeCampId: campaign._id.toString() } }
         );
 
-        if (result.status === 200) {
-          started.push({
-            campaignId: campaign._id.toString(),
-            campaignName: campaign.campaignName,
-            scheduledTime: campaign.scheduledTime,
-            actualStartTime: new Date().toISOString()
-          });
-          console.log(`✅ Successfully started campaign: ${campaign.campaignName}`);
-        } else {
-          throw new Error(result.message || 'Failed to start campaign');
-        }
+        // Start the campaign processing directly (don't call makeCallViaCampaign which creates a new campaign)
+        console.log(`🚀 Starting enhanced campaign processing: ${campaign.campaignName} (${campaign._id})`);
+        process.nextTick(() => processEnhancedCampaign(
+          campaign._id.toString(),
+          listData,
+          campaign.fromNumber,
+          campaign.wssUrl,
+          campaign.clientId,
+          campaign.listId,
+          campaign.provider
+        ));
+
+        started.push({
+          campaignId: campaign._id.toString(),
+          campaignName: campaign.campaignName,
+          scheduledTime: campaign.scheduledTime,
+          actualStartTime: new Date().toISOString()
+        });
+        console.log(`✅ Successfully started campaign: ${campaign.campaignName}`)
 
       } catch (error) {
         console.error(`❌ Failed to start campaign ${campaign.campaignName}:`, error.message);
