@@ -3437,26 +3437,64 @@ router.get('/check-scheduled-campaigns', async(req, res) => {
     const database = client.db("talkGlimpass");
     const campaignCollection = database.collection("plivoCampaign");
 
+    // STEP 1: Recover orphaned campaigns first (higher priority)
+    console.log('🔄 Checking for orphaned campaigns with stale heartbeats...');
+    const { scanAndRecoverOrphanedCampaigns } = require('../../utils/containerLifecycle.js');
+    let recoveryResult = { recovered: 0, failed: 0, total: 0 };
+
+    try {
+      recoveryResult = await scanAndRecoverOrphanedCampaigns();
+      console.log(`✅ Orphaned campaign recovery complete: ${recoveryResult.recovered || 0} recovered, ${recoveryResult.failed || 0} failed`);
+
+      if (recoveryResult.error) {
+        console.error(`⚠️  Orphaned campaign recovery had errors: ${recoveryResult.error}`);
+      }
+
+      if ((recoveryResult.failed || 0) > 0) {
+        console.error(`⚠️  ${recoveryResult.failed} orphaned campaigns failed to recover`);
+      }
+    } catch (recoveryError) {
+      console.error(`❌ Error during orphaned campaign recovery:`, recoveryError.message);
+      console.error(`❌ Recovery error stack:`, recoveryError.stack);
+      recoveryResult = { recovered: 0, failed: 0, total: 0, error: recoveryError.message };
+    }
+
+    // STEP 2: Start scheduled campaigns
+    console.log('📅 Checking for scheduled campaigns due to start...');
+
     // Get MAX_CAMPAIGNS limit from env (default to 5)
     const maxCampaigns = parseInt(process.env.MAX_CAMPAIGNS) || 5;
     console.log(`📊 MAX_CAMPAIGNS limit: ${maxCampaigns}`);
 
     // Find scheduled campaigns that are due to start
     const now = new Date();
-    const scheduledCampaigns = await campaignCollection
-      .find({
-        status: "scheduled",
-        scheduledTime: { $lte: now }
-      })
-      .sort({ scheduledTime: 1 }) // Start oldest scheduled first
-      .limit(maxCampaigns)
-      .toArray();
+    let scheduledCampaigns = [];
 
-    console.log(`📋 Found ${scheduledCampaigns.length} scheduled campaigns ready to start`);
+    try {
+      scheduledCampaigns = await campaignCollection
+        .find({
+          status: "scheduled",
+          scheduledTime: { $lte: now }
+        })
+        .sort({ scheduledTime: 1 }) // Start oldest scheduled first
+        .limit(maxCampaigns)
+        .toArray();
 
-    if (scheduledCampaigns.length === 0) {
+      console.log(`📋 Found ${scheduledCampaigns.length} scheduled campaigns ready to start`);
+    } catch (queryError) {
+      console.error(`❌ Error querying scheduled campaigns:`, queryError.message);
+      console.error(`❌ Query error stack:`, queryError.stack);
+      // Continue with empty array - don't fail the entire endpoint
+    }
+
+    if (scheduledCampaigns.length === 0 && (recoveryResult.recovered || 0) === 0) {
       return res.status(200).json({
         success: true,
+        orphanedRecovery: {
+          recovered: recoveryResult.recovered || 0,
+          failed: recoveryResult.failed || 0,
+          total: recoveryResult.total || 0
+        },
         message: 'No scheduled campaigns due to start',
         started: [],
         skipped: 0,
@@ -3589,28 +3627,65 @@ router.get('/check-scheduled-campaigns', async(req, res) => {
       }
     }
 
+    const totalRecovered = recoveryResult.recovered || 0;
+    const totalStarted = started.length;
+    const totalOperations = totalRecovered + totalStarted;
+
     const response = {
       success: true,
-      message: started.length > 0
-        ? `Started ${started.length} scheduled campaign(s)`
-        : 'No campaigns started',
-      started: started,
-      skipped: 0, // We limit via query, so no skipped
-      errors: errors.length > 0 ? errors : undefined,
-      timestamp: now.toISOString(),
-      maxCampaigns: maxCampaigns
+      message: totalOperations > 0
+        ? `Recovered ${totalRecovered} orphaned, started ${totalStarted} scheduled campaign(s)`
+        : 'No orphaned or scheduled campaigns to process',
+      orphanedRecovery: {
+        recovered: recoveryResult.recovered || 0,
+        failed: recoveryResult.failed || 0,
+        total: recoveryResult.total || 0
+      },
+      scheduledStart: {
+        started: started,
+        skipped: 0, // We limit via query, so no skipped
+        errors: errors.length > 0 ? errors : undefined,
+        maxCampaigns: maxCampaigns
+      },
+      timestamp: now.toISOString()
     };
 
-    console.log(`📊 Scheduled campaign check completed: ${started.length} started, ${errors.length} errors`);
+    // Summary logging
+    console.log(`📊 ======================================`);
+    console.log(`📊 CAMPAIGN CHECK SUMMARY:`);
+    console.log(`   🔄 Orphaned Recovery: ${totalRecovered} recovered, ${recoveryResult.failed || 0} failed (${recoveryResult.total || 0} total)`);
+    console.log(`   📅 Scheduled Start: ${totalStarted} started, ${errors.length} failed`);
+    console.log(`   ✅ Total Success: ${totalRecovered + totalStarted}`);
+    console.log(`   ❌ Total Failures: ${(recoveryResult.failed || 0) + errors.length}`);
+
+    if (recoveryResult.error) {
+      console.error(`   ⚠️  Orphan recovery error: ${recoveryResult.error}`);
+    }
+
+    if (errors.length > 0) {
+      console.error(`   ⚠️  Failed scheduled campaigns:`, errors.map(e => `${e.campaignName} (${e.error})`).join(', '));
+    }
+    console.log(`📊 ======================================`);
 
     res.status(200).json(response);
 
   } catch (error) {
-    console.error('❌ Error in check-scheduled-campaigns:', error);
+    console.error('❌ ======================================');
+    console.error('❌ CRITICAL ERROR in check-scheduled-campaigns endpoint');
+    console.error('❌ Error message:', error.message);
+    console.error('❌ Error stack:', error.stack);
+    console.error('❌ Error details:', JSON.stringify({
+      name: error.name,
+      code: error.code,
+      errno: error.errno
+    }, null, 2));
+    console.error('❌ ======================================');
+
     res.status(500).json({
       success: false,
-      message: 'Internal server error',
+      message: 'Internal server error in scheduled campaigns check',
       error: error.message,
+      errorType: error.name,
       timestamp: new Date().toISOString()
     });
   }
