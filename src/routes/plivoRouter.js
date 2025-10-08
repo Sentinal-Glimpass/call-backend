@@ -3439,7 +3439,7 @@ router.get('/check-scheduled-campaigns', async(req, res) => {
 
     // STEP 1: Recover orphaned campaigns first (higher priority)
     console.log('🔄 Checking for orphaned campaigns with stale heartbeats...');
-    const { scanAndRecoverOrphanedCampaigns } = require('../../utils/containerLifecycle.js');
+    const { scanAndRecoverOrphanedCampaigns } = require('../utils/containerLifecycle.js');
     let recoveryResult = { recovered: 0, failed: 0, total: 0 };
 
     try {
@@ -3535,7 +3535,7 @@ router.get('/check-scheduled-campaigns', async(req, res) => {
 
         // Update campaign status to "running" and set container info
         console.log(`   🔄 Updating campaign status to "running"...`);
-        const { CONTAINER_ID } = require('../../utils/containerLifecycle.js');
+        const { CONTAINER_ID } = require('../utils/containerLifecycle.js');
         const updateResult = await campaignCollection.updateOne(
           { _id: campaign._id },
           {
