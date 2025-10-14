@@ -475,9 +475,9 @@ setInterval(() => {
  * @returns {Promise<{success: boolean, callId?: string, callUUID?: string, error?: string}>}
  */
 async function processSingleCall(callParams) {
-  const { clientId, campaignId, from, to, wssUrl, firstName, tag, listId } = callParams;
+  const { clientId, campaignId, from, to, wssUrl, firstName, tag, email, listId } = callParams;
   const startTime = Date.now();
-  
+
   try {
     console.log(`🚀 Processing call: ${from} -> ${to} (Client: ${clientId})`);
     
@@ -569,6 +569,7 @@ async function processSingleCall(callParams) {
         wssUrl,
         firstName,
         tag,
+        email,
         listId,
         campaignId,
         provider: callParams.provider // Pass provider parameter for explicit routing

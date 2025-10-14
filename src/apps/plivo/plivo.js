@@ -168,19 +168,19 @@ async function insertListContent(rows) {
     }
   }
 
-  async function initiatePlivoCall(from, to, wssUrl, clientId, listDataStringify, uploadedName= '', tag = '', listId = 'incoming', camp_id = 'incoming') {
+  async function initiatePlivoCall(from, to, wssUrl, clientId, listDataStringify, uploadedName= '', tag = '', listId = 'incoming', camp_id = 'incoming', email = '') {
     const accountSid = process.env.PLIVO_ACCOUNT_SID;
     const plivoApiUrl = `https://api.plivo.com/v1/Account/${accountSid}/Call/`;
-    
+
     // Get base URL from environment variable, fallback to default if not set
     const baseUrl = process.env.BASE_URL || 'https://application.glimpass.com';
-    
+
     const payload = {
       from,
       to,
       ring_url: `${baseUrl}/plivo/ring-url`,
       hangup_url: `${baseUrl}/plivo/hangup-url?campId=${camp_id}&hangupFirstName=${uploadedName}&tag=${tag}`,
-      answer_url: `${baseUrl}/ip/xml-plivo?wss=${wssUrl}&clientId=${clientId}&listId=${listId}&campId=${camp_id}&firstName=${uploadedName}&csvData=${listDataStringify}`,
+      answer_url: `${baseUrl}/ip/xml-plivo?wss=${wssUrl}&clientId=${clientId}&listId=${listId}&campId=${camp_id}&firstName=${uploadedName}&email=${encodeURIComponent(email)}&tag=${encodeURIComponent(tag)}&csvData=${listDataStringify}`,
       answer_method: 'POST',
     };
 
@@ -1518,6 +1518,7 @@ async function processEnhancedCampaign(campaignId, listData, fromNumber, wssUrl,
         to: contact.number,
         wssUrl,
         firstName: contact.first_name,
+        email: contact.email,
         tag: assistantId, // Use assistantId for NEW billing system
         listId,
         provider: provider, // Pass explicit provider for campaign-wide provider selection

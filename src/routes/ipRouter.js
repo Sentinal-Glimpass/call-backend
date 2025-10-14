@@ -136,6 +136,8 @@ router.get('/release-session', authenticateToken, auditLog, async(req,res) => {
 router.post('/xml-plivo', (req, res) => {
     const { wss, listId, clientId, campId, csvData} = req.query;
     const firstName = req.query.firstName ?? ''
+    const email = req.query.email ?? ''
+    const tag = req.query.tag ?? ''
     const from = req.body.From
     const to = req.body.To
     const Direction = req.body.Direction
@@ -145,7 +147,7 @@ router.post('/xml-plivo', (req, res) => {
         return num.replace(/^\+/, ''); // Remove leading '+'
     };
     console.log(csvData)
-    
+
     let sanitizedFrom = sanitizeNumber(from);
     let sanitizedTo = sanitizeNumber(to);
     if(Direction != 'inbound'){
@@ -154,17 +156,17 @@ router.post('/xml-plivo', (req, res) => {
     }
     // Get base URL from environment variable, fallback to default if not set
     const baseUrl = process.env.BASE_URL || 'https://application.glimpass.com';
-    
+
     const xml = `<Response>
     <Record action="${baseUrl}/plivo/callback-record-url" redirect="false" recordSession="true" maxLength="3600" />
-    <Stream 
-        streamTimeout="3600" 
-	keepCallAlive="true" 
-	bidirectional="true" 
+    <Stream
+        streamTimeout="3600"
+	keepCallAlive="true"
+	bidirectional="true"
         audioTrack="inbound"
-        extraHeaders="from=${sanitizedFrom},to=${sanitizedTo},callUUID=${CallUUID},listId=${listId},clientId=${clientId},campId=${campId},firstName=${firstName},provider=plivo"
+        extraHeaders="from=${sanitizedFrom},to=${sanitizedTo},callUUID=${CallUUID},listId=${listId},clientId=${clientId},campId=${campId},firstName=${firstName},email=${email},tag=${tag},provider=plivo"
 	contentType="audio/x-mulaw;rate=8000"
-        statusCallbackUrl="${baseUrl}/plivo/callback-url" 
+        statusCallbackUrl="${baseUrl}/plivo/callback-url"
         statusCallbackMethod="POST">${wss}</Stream>
 </Response>`;
     res.type('application/xml');

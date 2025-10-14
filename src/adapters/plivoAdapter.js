@@ -14,25 +14,25 @@ class PlivoAdapter {
    */
   static async makeCall(callParams, providerConfig) {
     try {
-      const { from, to, wssUrl, firstName, tag, listId, campaignId, clientId } = callParams;
-      
+      const { from, to, wssUrl, firstName, tag, email, listId, campaignId, clientId } = callParams;
+
       // Use provided config or fall back to environment/defaults
       const accountSid = providerConfig?.accountSid || process.env.PLIVO_ACCOUNT_SID || 'default_account_sid';
       const authToken = providerConfig?.authToken || process.env.PLIVO_AUTH_TOKEN || 'default_auth_token';
-      
+
       const plivoApiUrl = `https://api.plivo.com/v1/Account/${accountSid}/Call/`;
       const baseUrl = process.env.BASE_URL || 'https://application.glimpass.com';
-      
+
       // Prepare CSV data (maintain compatibility with existing system)
-      const listDataStringify = JSON.stringify({ firstName: firstName || '', tag: tag || '' });
+      const listDataStringify = JSON.stringify({ firstName: firstName || '', email: email || '', tag: tag || '' });
       const campId = campaignId || 'direct';
-      
+
       const payload = {
         from,
         to,
         ring_url: `${baseUrl}/plivo/ring-url`,
         hangup_url: `${baseUrl}/plivo/hangup-url?campId=${campId}&hangupFirstName=${firstName || ''}&tag=${tag || ''}`,
-        answer_url: `${baseUrl}/ip/xml-plivo?wss=${wssUrl}&clientId=${clientId}&listId=${listId || 'direct'}&campId=${campId}&firstName=${firstName || ''}&csvData=${listDataStringify}`,
+        answer_url: `${baseUrl}/ip/xml-plivo?wss=${wssUrl}&clientId=${clientId}&listId=${listId || 'direct'}&campId=${campId}&firstName=${firstName || ''}&email=${encodeURIComponent(email || '')}&tag=${encodeURIComponent(tag || '')}&csvData=${listDataStringify}`,
         answer_method: 'POST',
       };
       
