@@ -39,7 +39,7 @@ class GmailMCPServer extends BaseMCPServer {
 
         const template = templateResponse.data?.find(t => t._id === tool.template_id);
         if (!template) {
-          throw new Error(`Email template not found for tool: ${tool.name}`);
+          throw new Error(`Email template not found for tool: ${tool.tool_name || tool.name}`);
         }
 
         // Replace variables in template
@@ -324,7 +324,7 @@ class GmailMCPServer extends BaseMCPServer {
             }
 
             tools.push({
-              name: tool.name,
+              name: tool.tool_name || tool.name,
               description: tool.description || 'Send email',
               inputSchema: inputSchema
             });
@@ -346,7 +346,7 @@ class GmailMCPServer extends BaseMCPServer {
         method: 'GET'
       });
 
-      const tool = response.data?.find(t => t.name === toolName && t.enabled);
+      const tool = response.data?.find(t => (t.tool_name || t.name) === toolName && t.enabled);
       if (!tool) {
         throw new Error(`Tool '${toolName}' not found or not enabled`);
       }
