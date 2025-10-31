@@ -281,16 +281,18 @@ class GmailMCPServer extends BaseMCPServer {
 
   async handleToolsList() {
     try {
-      // Get user-created email tools for this client
-      const response = await makeInternalAPIRequest(`/api/tools/gmail?client_id=${this.clientId}`, {
+      // Get agent's assigned email tools (only those assigned to this agent)
+      const response = await makeInternalAPIRequest(`/api/tools/gmail/agents/${this.agentId}`, {
         method: 'GET'
       });
 
       const tools = [];
 
-      if (response.data && response.data.length > 0) {
-        for (const tool of response.data) {
-          if (tool.enabled) {
+      if (response.data?.assigned_tools && response.data.assigned_tools.length > 0) {
+        for (const assignedTool of response.data.assigned_tools) {
+          // Only include enabled tools
+          if (assignedTool.enabled && assignedTool.tool_details) {
+            const tool = assignedTool.tool_details;
             // Get template details to build dynamic schema
             let inputSchema = {
               type: 'object',
@@ -341,15 +343,21 @@ class GmailMCPServer extends BaseMCPServer {
 
   async handleToolCall(toolName, args) {
     try {
-      // Get user-created email tool details
-      const response = await makeInternalAPIRequest(`/api/tools/gmail?client_id=${this.clientId}`, {
+      // Get agent's assigned email tools (only those assigned to this agent)
+      const response = await makeInternalAPIRequest(`/api/tools/gmail/agents/${this.agentId}`, {
         method: 'GET'
       });
 
-      const tool = response.data?.find(t => (t.tool_name || t.name) === toolName && t.enabled);
-      if (!tool) {
-        throw new Error(`Tool '${toolName}' not found or not enabled`);
+      // Find the tool in assigned tools
+      const assignedTool = response.data?.assigned_tools?.find(
+        at => at.enabled && at.tool_details && (at.tool_details.tool_name || at.tool_details.name) === toolName
+      );
+
+      if (!assignedTool) {
+        throw new Error(`Tool '${toolName}' not found or not assigned to agent`);
       }
+
+      const tool = assignedTool.tool_details;
 
       // Validate required parameters based on template variables
       const requiredParams = ['to'];
