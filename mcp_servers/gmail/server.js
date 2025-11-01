@@ -28,7 +28,7 @@ class GmailMCPServer extends BaseMCPServer {
     try {
       const { to, ...templateVars } = args;
 
-      // Validate email addresses
+      // Validate email address
       validateEmail(to);
 
       // Get template if tool uses template
@@ -39,12 +39,15 @@ class GmailMCPServer extends BaseMCPServer {
 
         const template = templateResponse.data?.find(t => t._id === tool.template_id);
         if (!template) {
-          throw new Error(`Email template not found for tool: ${tool.tool_name || tool.name}`);
+          throw new Error(`Email template not found`);
         }
 
-        // Replace variables in template
+        // Replace variables in template (missing vars will be replaced with empty string)
         const subject = replaceTemplateVariables(template.subject, templateVars);
         const body = replaceTemplateVariables(template.body_text || template.body_html, templateVars);
+
+        console.log(`📧 Sending template email to ${to}`);
+        console.log(`📧 Template vars:`, Object.keys(templateVars));
 
         // Send email using the internal send method
         return await this.sendEmail({
@@ -52,15 +55,15 @@ class GmailMCPServer extends BaseMCPServer {
           to,
           subject,
           body,
-          html: !!template.body_html // Use HTML if body_html exists
+          html: !!template.body_html
         });
       } else {
         // For non-template tools, use direct email sending
         return await this.sendEmail({
           client_id: this.clientId,
           to,
-          subject: templateVars.subject || 'Email from Gmail MCP Server',
-          body: templateVars.body || templateVars.content || 'No content provided',
+          subject: templateVars.subject || 'Email',
+          body: templateVars.body || templateVars.content || 'No content',
           html: false
         });
       }
@@ -283,7 +286,7 @@ class GmailMCPServer extends BaseMCPServer {
           if (assignedTool.enabled && assignedTool.tool_details) {
             const tool = assignedTool.tool_details;
 
-            // Simplified schema - just require 'to', let template variables be optional
+            // Build schema with template variables so LLM knows what to extract
             const inputSchema = {
               type: 'object',
               properties: {
@@ -291,6 +294,31 @@ class GmailMCPServer extends BaseMCPServer {
               },
               required: ['to']
             };
+
+            // Add template variables to schema if template exists
+            if (tool.template_id) {
+              try {
+                const templateResponse = await makeInternalAPIRequest(`/api/tools/gmail/templates?client_id=${this.clientId}`, {
+                  method: 'GET'
+                });
+
+                const template = templateResponse.data?.find(t => t._id === tool.template_id);
+                if (template && template.variables) {
+                  // Add template variables so LLM knows what to extract
+                  for (const variable of template.variables) {
+                    inputSchema.properties[variable.name] = {
+                      type: 'string',
+                      description: variable.description || `Template variable: ${variable.name}`
+                    };
+                    if (variable.required !== false) {
+                      inputSchema.required.push(variable.name);
+                    }
+                  }
+                }
+              } catch (templateError) {
+                console.error('Error fetching template for tool:', templateError);
+              }
+            }
 
             tools.push({
               name: tool.tool_name || tool.name,
@@ -310,6 +338,9 @@ class GmailMCPServer extends BaseMCPServer {
 
   async handleToolCall(toolName, args) {
     try {
+      console.log(`📧 Gmail MCP tool call: ${toolName}`);
+      console.log(`📧 Args received:`, JSON.stringify(args, null, 2));
+
       // Get agent's assigned email tools
       const response = await makeInternalAPIRequest(`/api/tools/gmail/agents/${this.agentId}`, {
         method: 'GET'
@@ -334,17 +365,29 @@ class GmailMCPServer extends BaseMCPServer {
       // Use the user-created tool to send email
       const result = await this.sendUserEmail(tool, args);
 
+      // Create response text with size limit to prevent streaming issues
+      const responseText = JSON.stringify(result, null, 2);
+      const truncatedText = responseText.length > 1000
+        ? JSON.stringify({
+            success: result.success,
+            message: result.message,
+            data: result.success ? { message_id: result.data?.message_id || 'sent' } : null
+          }, null, 2)
+        : responseText;
+
+      console.log(`📧 Gmail MCP response size: ${truncatedText.length} chars`);
+
       // Return simplified MCP response format (matches WATI pattern)
       return {
         content: [
           {
             type: 'text',
-            text: JSON.stringify(result, null, 2)
+            text: truncatedText
           }
         ]
       };
     } catch (error) {
-      console.error('Error in tool call:', error);
+      console.error('❌ Gmail MCP error in tool call:', error);
       return {
         content: [
           {
