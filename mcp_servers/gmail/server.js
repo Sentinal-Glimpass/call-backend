@@ -86,17 +86,8 @@ class GmailMCPServer extends BaseMCPServer {
       console.log(`🔍 Getting Gmail credentials for client: ${client_id}`);
       const credentials = await TelephonyCredentialsService.getCredentials(client_id, 'gmail');
 
-      console.log(`🔍 Credentials object: ${credentials ? 'YES' : 'NO'}`);
-      console.log(`🔍 Credentials keys: ${credentials ? Object.keys(credentials) : 'NONE'}`);
-
-      if (!credentials || !credentials.gmail_user) {
-        throw new Error(`Gmail credentials not found for client: ${client_id}`);
-      }
-      console.log(`🔑 Email credentials found: ${credentials ? 'YES' : 'NO'}`);
-      console.log(`📧 Gmail user configured: ${credentials.gmail_user ? 'YES' : 'NO'}`);
-
-      if (!credentials.gmail_user || !credentials.gmail_password) {
-        throw new Error('Gmail credentials (gmail_user, gmail_password) not found');
+      if (!credentials || !credentials.gmail_user || !credentials.gmail_password) {
+        throw new Error('Gmail credentials not found');
       }
 
       // Create transporter
@@ -119,18 +110,16 @@ class GmailMCPServer extends BaseMCPServer {
       if (cc) mailOptions.cc = cc;
       if (bcc) mailOptions.bcc = bcc;
 
-      console.error(`Sending email to ${to} with subject: ${subject}`);
+      console.log(`📧 Sending email to ${to} with subject: ${subject}`);
 
       // Send email
       const info = await transporter.sendMail(mailOptions);
 
+      // Simplified response matching WATI pattern
       return formatMCPResponse(true, {
-        message_id: info.messageId,
-        accepted: info.accepted,
-        rejected: info.rejected,
-        to: to,
-        subject: subject,
-        from: credentials.gmail_user
+        message_id: info.messageId || 'sent',
+        recipient: to,
+        subject: subject
       }, 'Email sent successfully');
 
     } catch (error) {
@@ -281,7 +270,7 @@ class GmailMCPServer extends BaseMCPServer {
 
   async handleToolsList() {
     try {
-      // Get agent's assigned email tools (only those assigned to this agent)
+      // Get agent's assigned email tools
       const response = await makeInternalAPIRequest(`/api/tools/gmail/agents/${this.agentId}`, {
         method: 'GET'
       });
@@ -293,37 +282,15 @@ class GmailMCPServer extends BaseMCPServer {
           // Only include enabled tools
           if (assignedTool.enabled && assignedTool.tool_details) {
             const tool = assignedTool.tool_details;
-            // Get template details to build dynamic schema
-            let inputSchema = {
+
+            // Simplified schema - just require 'to', let template variables be optional
+            const inputSchema = {
               type: 'object',
               properties: {
                 to: { type: 'string', description: 'Recipient email address' }
               },
               required: ['to']
             };
-
-            // If it's a template-based tool, get template variables
-            if (tool.template_id) {
-              try {
-                const templateResponse = await makeInternalAPIRequest(`/api/tools/gmail/templates?client_id=${this.clientId}`, {
-                  method: 'GET'
-                });
-
-                const template = templateResponse.data?.find(t => t._id === tool.template_id);
-                if (template && template.variables) {
-                  // Add template variables to schema
-                  for (const variable of template.variables) {
-                    inputSchema.properties[variable.name] = {
-                      type: 'string',
-                      description: variable.description || `Template variable: ${variable.name}`
-                    };
-                    inputSchema.required.push(variable.name);
-                  }
-                }
-              } catch (templateError) {
-                console.error('Error fetching template for tool:', templateError);
-              }
-            }
 
             tools.push({
               name: tool.tool_name || tool.name,
@@ -343,7 +310,7 @@ class GmailMCPServer extends BaseMCPServer {
 
   async handleToolCall(toolName, args) {
     try {
-      // Get agent's assigned email tools (only those assigned to this agent)
+      // Get agent's assigned email tools
       const response = await makeInternalAPIRequest(`/api/tools/gmail/agents/${this.agentId}`, {
         method: 'GET'
       });
@@ -359,34 +326,15 @@ class GmailMCPServer extends BaseMCPServer {
 
       const tool = assignedTool.tool_details;
 
-      // Validate required parameters based on template variables
-      const requiredParams = ['to'];
-
-      if (tool.template_id) {
-        // Get template to determine required variables
-        const templateResponse = await makeInternalAPIRequest(`/api/tools/gmail/templates?client_id=${this.clientId}`, {
-          method: 'GET'
-        });
-
-        const template = templateResponse.data?.find(t => t._id === tool.template_id);
-        if (template && template.variables) {
-          // Add all template variables as required
-          for (const variable of template.variables) {
-            requiredParams.push(variable.name);
-          }
-        }
-      }
-
-      // Validate that all required parameters are provided
-      const missingParams = requiredParams.filter(param => !args[param]);
-      if (missingParams.length > 0) {
-        throw new Error(`Missing required parameters: ${missingParams.join(', ')}`);
+      // Simple validation - just check 'to' is provided
+      if (!args.to) {
+        throw new Error('Missing required parameter: to');
       }
 
       // Use the user-created tool to send email
       const result = await this.sendUserEmail(tool, args);
 
-      // Return MCP tool call response format
+      // Return simplified MCP response format (matches WATI pattern)
       return {
         content: [
           {
@@ -401,10 +349,7 @@ class GmailMCPServer extends BaseMCPServer {
         content: [
           {
             type: 'text',
-            text: JSON.stringify({
-              success: false,
-              error: error.message
-            }, null, 2)
+            text: JSON.stringify(formatMCPResponse(false, null, 'Failed to send email', error.message), null, 2)
           }
         ]
       };
