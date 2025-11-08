@@ -15,7 +15,7 @@ class TwilioAdapter {
    */
   static async makeCall(callParams, providerConfig) {
     try {
-      const { from, to, wssUrl, firstName, tag, listId, campaignId, clientId } = callParams;
+      const { from, to, wssUrl, firstName, tag, listId, campaignId, clientId, dynamicFields } = callParams;
       
       // SIMPLE FIX: Generate UUID upfront and save call record BEFORE API call (like legacy Plivo)
       const preGeneratedUUID = uuidv4();
@@ -52,24 +52,44 @@ class TwilioAdapter {
       const client = twilio(accountSid, authToken);
       const baseUrl = process.env.BASE_URL || 'https://application.glimpass.com';
       
-      // Prepare Twilio-specific parameters
+      // Prepare contact data with ALL CSV fields (flat structure, no nesting)
+      const contactData = dynamicFields || {};
       const campId = campaignId || 'direct';
+
+      // Build query parameters with ALL CSV fields as individual parameters
       const queryParams = new URLSearchParams({
         wss: wssUrl,
         clientId: clientId || '',
-        listId: listId || 'direct', 
+        listId: listId || 'direct',
         campId,
-        firstName: firstName || '',
-        tag: tag || '',
         preUUID: preGeneratedUUID // Pass our UUID to webhooks
-      }).toString();
+      });
+
+      // Add ALL CSV fields as individual query parameters (flat structure)
+      let csvFieldCount = 0;
+      for (const [key, value] of Object.entries(contactData)) {
+        // Skip internal MongoDB fields
+        if (!['_id', 'listId'].includes(key) && value !== undefined && value !== null) {
+          queryParams.append(key, String(value));
+          csvFieldCount++;
+        }
+      }
+
+      // Ensure backward compatibility
+      if (!contactData.firstName && firstName) queryParams.set('firstName', firstName);
+      if (!contactData.first_name && firstName) queryParams.set('first_name', firstName);
+      if (!contactData.tag && tag) queryParams.set('tag', tag);
+
+      console.log(`📋 [Twilio] Passing ${csvFieldCount} CSV fields as flat query parameters`);
+
+      const queryString = queryParams.toString();
       
       const webhookUrls = this.getWebhookUrls(baseUrl, { campId, firstName, tag });
       
       const twilioPayload = {
         from,
         to,
-        url: `${webhookUrls.twiml}?${queryParams}`,
+        url: `${webhookUrls.twiml}?${queryString}`,
         statusCallback: webhookUrls.statusCallback,
         statusCallbackEvent: ['initiated', 'ringing', 'answered', 'completed'],
         statusCallbackMethod: 'POST',
@@ -227,23 +247,44 @@ class TwilioAdapter {
   }
   
   /**
-   * Generate TwiML response for call handling
-   * @param {Object} params - TwiML parameters
+   * Generate TwiML response for call handling with dynamic CSV fields (flat structure)
+   * @param {Object} params - TwiML parameters (all CSV fields passed as individual properties)
    * @returns {string} TwiML XML
    */
   static generateTwiML(params) {
-    const { wssUrl, callSid, clientId, campaignId, listId, firstName, from, to, tag } = params;
-    
+    const { wssUrl, callSid, clientId, campaignId, listId, from, to, ...allOtherParams } = params;
+
     // Sanitize phone numbers (remove + prefix like Plivo does)
     const sanitizeNumber = (num) => {
       if (!num) return '';
       return num.replace(/^\+/, '');
     };
-    
+
     const sanitizedFrom = sanitizeNumber(from);
     const sanitizedTo = sanitizeNumber(to);
-    
-    // Use simpler Connect + Stream approach like the Python reference server (this was working!)
+
+    // Generate Parameter tags for ALL remaining params (CSV fields passed flat)
+    const systemFields = ['wssUrl', 'twilioCallSid'];
+    let dynamicParameters = '';
+    let csvFieldCount = 0;
+
+    for (const [key, value] of Object.entries(allOtherParams)) {
+      // Skip system/internal fields
+      if (!systemFields.includes(key) && !['_id'].includes(key) && value !== undefined && value !== null) {
+        const escapedValue = String(value || '')
+          .replace(/&/g, '&amp;')
+          .replace(/</g, '&lt;')
+          .replace(/>/g, '&gt;')
+          .replace(/"/g, '&quot;')
+          .replace(/'/g, '&apos;');
+        dynamicParameters += `\n            <Parameter name="${key}" value="${escapedValue}" />`;
+        csvFieldCount++;
+      }
+    }
+
+    console.log(`📋 [Twilio TwiML] Generated ${csvFieldCount} dynamic parameters from CSV fields`);
+
+    // Use simpler Connect + Stream approach with dynamic parameters
     return `<?xml version="1.0" encoding="UTF-8"?>
 <Response>
     <Connect>
@@ -254,8 +295,7 @@ class TwilioAdapter {
             <Parameter name="listId" value="${listId || ''}" />
             <Parameter name="clientId" value="${clientId || ''}" />
             <Parameter name="campId" value="${campaignId || ''}" />
-            <Parameter name="firstName" value="${firstName || ''}" />
-            <Parameter name="provider" value="twilio" />
+            <Parameter name="provider" value="twilio" />${dynamicParameters}
         </Stream>
     </Connect>
 </Response>`;

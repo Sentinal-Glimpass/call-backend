@@ -134,19 +134,16 @@ router.get('/release-session', authenticateToken, auditLog, async(req,res) => {
 })
 
 router.post('/xml-plivo', (req, res) => {
-    const { wss, listId, clientId, campId, csvData} = req.query;
-    const firstName = req.query.firstName ?? ''
-    const email = req.query.email ?? ''
-    const tag = req.query.tag ?? ''
+    const { wss, listId, clientId, campId, ...allQueryParams } = req.query;
     const from = req.body.From
     const to = req.body.To
     const Direction = req.body.Direction
     const CallUUID = req.body.CallUUID
+
     const sanitizeNumber = (num) => {
         if (!num) return null; // Handle case where num is undefined or null
         return num.replace(/^\+/, ''); // Remove leading '+'
     };
-    console.log(csvData)
 
     let sanitizedFrom = sanitizeNumber(from);
     let sanitizedTo = sanitizeNumber(to);
@@ -154,6 +151,36 @@ router.post('/xml-plivo', (req, res) => {
         sanitizedFrom = sanitizeNumber(to);
         sanitizedTo = sanitizeNumber(from);
     }
+
+    // Build extraHeaders from ALL query parameters (flat structure, no nesting)
+    let extraHeadersArray = [
+        `from=${sanitizedFrom}`,
+        `to=${sanitizedTo}`,
+        `callUUID=${CallUUID}`,
+        `listId=${listId}`,
+        `clientId=${clientId}`,
+        `campId=${campId}`,
+        `provider=plivo`
+    ];
+
+    // Add ALL remaining query parameters as headers (these are CSV fields passed flat)
+    const systemFields = ['wss', 'listId', 'clientId', 'campId', 'from', 'to', 'callUUID', 'provider'];
+    let csvFieldCount = 0;
+
+    for (const [key, value] of Object.entries(allQueryParams)) {
+        // Skip system fields and internal fields
+        if (!systemFields.includes(key) && !['_id'].includes(key) && value) {
+            // Sanitize value for header (escape commas and equals)
+            const sanitizedValue = String(value).replace(/,/g, '%2C').replace(/=/g, '%3D');
+            extraHeadersArray.push(`${key}=${sanitizedValue}`);
+            csvFieldCount++;
+        }
+    }
+
+    console.log(`✅ [XML] Generated ${extraHeadersArray.length} total headers (${csvFieldCount} from CSV fields)`);
+
+    const extraHeaders = extraHeadersArray.join(',');
+
     // Get base URL from environment variable, fallback to default if not set
     const baseUrl = process.env.BASE_URL || 'https://application.glimpass.com';
 
@@ -164,7 +191,7 @@ router.post('/xml-plivo', (req, res) => {
 	keepCallAlive="true"
 	bidirectional="true"
         audioTrack="inbound"
-        extraHeaders="from=${sanitizedFrom},to=${sanitizedTo},callUUID=${CallUUID},listId=${listId},clientId=${clientId},campId=${campId},firstName=${firstName},email=${email},tag=${tag},provider=plivo"
+        extraHeaders="${extraHeaders}"
 	contentType="audio/x-mulaw;rate=8000"
         statusCallbackUrl="${baseUrl}/plivo/callback-url"
         statusCallbackMethod="POST">${wss}</Stream>

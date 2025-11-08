@@ -16,10 +16,16 @@ class CallProviderService {
    */
   static async makeCall(callParams) {
     try {
-      const { from, to, wssUrl, clientId, campaignId, firstName, tag, listId, provider } = callParams;
-      
+      const { from, to, wssUrl, clientId, campaignId, firstName, tag, email, listId, provider, dynamicFields } = callParams;
+
       console.log(`📞 Unified call routing: ${from} → ${to} (Client: ${clientId})`);
       console.log(`🔍 CALLPROVIDERSERVICE DEBUG - Provider parameter received:`, provider);
+
+      // Log dynamic fields for debugging
+      if (dynamicFields && Object.keys(dynamicFields).length > 0) {
+        const fieldNames = Object.keys(dynamicFields).filter(key => !['listId', '_id'].includes(key));
+        console.log(`📋 Dynamic CSV fields detected: ${fieldNames.join(', ')}`);
+      }
       
       let providerInfo;
       

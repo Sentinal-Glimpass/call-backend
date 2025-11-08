@@ -45,16 +45,16 @@ const { connectToMongo, client } = require('../../models/mongodb.js');
  */
 router.post('/twiml', (req, res) => {
   try {
-    const { wss, clientId, campId, listId, firstName, tag, preUUID } = req.query;
+    const { wss, clientId, campId, listId, preUUID, ...allQueryParams } = req.query;
     const { CallSid, From, To } = req.body;
-    
+
     console.log(`🔵 Twilio TwiML request:`);
     console.log(`   Call SID: ${CallSid}`);
     console.log(`   From: ${From}`);
     console.log(`   To: ${To}`);
     console.log(`   WSS URL: ${wss}`);
     console.log(`   Client ID: ${clientId}`);
-    
+
     if (!wss) {
       console.error('❌ Missing WebSocket URL in TwiML request');
       const errorTwiML = `<?xml version="1.0" encoding="UTF-8"?>
@@ -64,19 +64,18 @@ router.post('/twiml', (req, res) => {
 </Response>`;
       return res.type('application/xml').send(errorTwiML);
     }
-    
-    // Generate TwiML response with all available data (matching Plivo extraHeaders)
+
+    // Generate TwiML response with all query parameters (flat structure, all CSV fields passed individually)
     const twiml = TwilioAdapter.generateTwiML({
       wssUrl: wss,
       callSid: preUUID || CallSid, // Use our pre-generated UUID if available
       clientId: clientId,
       campaignId: campId,
       listId: listId,
-      firstName: firstName,
       from: From,
       to: To,
-      tag: tag,
-      twilioCallSid: CallSid // Keep Twilio CallSid for debugging
+      twilioCallSid: CallSid, // Keep Twilio CallSid for debugging
+      ...allQueryParams // Spread ALL remaining query params (CSV fields passed flat)
     });
     
     console.log(`✅ Generated TwiML for call ${CallSid}`);

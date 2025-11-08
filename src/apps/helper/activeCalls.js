@@ -475,7 +475,7 @@ setInterval(() => {
  * @returns {Promise<{success: boolean, callId?: string, callUUID?: string, error?: string}>}
  */
 async function processSingleCall(callParams) {
-  const { clientId, campaignId, from, to, wssUrl, firstName, tag, email, listId } = callParams;
+  const { clientId, campaignId, from, to, wssUrl, firstName, tag, email, listId, dynamicFields } = callParams;
   const startTime = Date.now();
 
   try {
@@ -572,7 +572,8 @@ async function processSingleCall(callParams) {
         email,
         listId,
         campaignId,
-        provider: callParams.provider // Pass provider parameter for explicit routing
+        provider: callParams.provider, // Pass provider parameter for explicit routing
+        dynamicFields: dynamicFields || {} // Pass all dynamic CSV fields
       });
       
       if (!callResult.success) {
@@ -701,7 +702,7 @@ async function processSingleCall(callParams) {
  * @returns {Promise<{success: boolean, callUUID?: string, error?: string}>}
  */
 async function makePlivoCall(params) {
-  const { from, to, wssUrl, firstName, tag, listId, campaignId } = params;
+  const { from, to, wssUrl, firstName, tag, email, listId, campaignId, dynamicFields } = params;
   
   try {
     console.log(`📞 Making Plivo API call: ${from} -> ${to}`);
@@ -713,15 +714,38 @@ async function makePlivoCall(params) {
     
     // Get base URL from environment variable, fallback to default if not set
     const baseUrl = process.env.BASE_URL || 'https://application.glimpass.com';
-    
-    const listDataStringify = JSON.stringify({ firstName, tag });
-    
+
+    // Prepare contact data with ALL CSV fields (flat structure, no nesting)
+    const contactData = dynamicFields || {};
+    const campIdValue = campaignId || 'direct';
+
+    // Build answer_url with ALL CSV fields as individual query parameters
+    const answerUrlParams = new URLSearchParams({
+      wss: wssUrl,
+      clientId: params.clientId,
+      listId: listId || 'direct',
+      campId: campIdValue
+    });
+
+    // Add ALL CSV fields as individual query parameters (flat structure)
+    for (const [key, value] of Object.entries(contactData)) {
+      if (!['_id', 'listId'].includes(key) && value !== undefined && value !== null) {
+        answerUrlParams.append(key, String(value));
+      }
+    }
+
+    // Ensure backward compatibility
+    if (!contactData.firstName && firstName) answerUrlParams.set('firstName', firstName);
+    if (!contactData.first_name && firstName) answerUrlParams.set('first_name', firstName);
+    if (!contactData.email && email) answerUrlParams.set('email', email);
+    if (!contactData.tag && tag) answerUrlParams.set('tag', tag);
+
     const payload = {
       from,
       to,
       ring_url: `${baseUrl}/plivo/ring-url`,
-      hangup_url: `${baseUrl}/plivo/hangup-url?campId=${campaignId || 'direct'}&hangupFirstName=${firstName || ''}&tag=${tag || ''}`,
-      answer_url: `${baseUrl}/ip/xml-plivo?wss=${wssUrl}&clientId=${params.clientId}&listId=${listId || 'direct'}&campId=${campaignId || 'direct'}&firstName=${firstName || ''}&csvData=${listDataStringify}`,
+      hangup_url: `${baseUrl}/plivo/hangup-url?campId=${campIdValue}&hangupFirstName=${firstName || ''}&tag=${tag || ''}`,
+      answer_url: `${baseUrl}/ip/xml-plivo?${answerUrlParams.toString()}`,
       answer_method: 'POST',
     };
     

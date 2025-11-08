@@ -371,11 +371,11 @@ async function updateCampaignStatus(campaignId, failedCalls, connectedCall, isCa
 async function getlistDataById(listId) {
   try{
     await connectToMongo();
-  
+
     const database = client.db("talkGlimpass");
     const collection = database.collection("plivo-list-data");
 
-    const listData = collection.find({listId: new ObjectId(listId)}).toArray();
+    const listData = await collection.find({listId: new ObjectId(listId)}).toArray();
 
     return listData;
 
@@ -1511,21 +1511,25 @@ async function processEnhancedCampaign(campaignId, listData, fromNumber, wssUrl,
       }
       
       // Process single call using unified system with assistantId as tag for billing
+      // Pass full contact object to support dynamic CSV columns
       const callResult = await processSingleCall({
         clientId,
         campaignId,
         from: fromNumber,
         to: contact.number,
         wssUrl,
-        firstName: contact.first_name,
-        email: contact.email,
+        // Pass individual fields for backward compatibility
+        firstName: contact.first_name || '',
+        email: contact.email || '',
         tag: assistantId, // Use assistantId for NEW billing system
         listId,
         provider: provider, // Pass explicit provider for campaign-wide provider selection
         // Enhanced tracking for pause/resume
         contactIndex: i,                           // Position in list
         sequenceNumber: i + 1,                     // Sequence number (1-based)
-        contactData: contact                       // Full contact data
+        contactData: contact,                      // Full contact data with ALL CSV columns
+        // Pass all dynamic fields from CSV
+        dynamicFields: contact                     // All CSV fields for dynamic header generation
       });
       
       // Track results and update campaign statistics

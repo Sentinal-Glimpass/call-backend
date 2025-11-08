@@ -134,16 +134,27 @@ router.post('/upload-csv', upload.single('file'), async (req, res) => {
 
 const validateCsvFormat = (data) => {
   if (data.length === 0) return false;
-  const expectedHeaders = ['number', 'first_name', 'last_name', 'company_name', 'email', 'tag', 'custom_field'];
-  // Check if the headers in the data match the expected headers
-  let headers = Object.keys(data[0]);
-	headers= headers.slice(0,7)
-  if (!expectedHeaders.every(header => headers.includes(header))) {
+
+  // Only 'number' is mandatory, all other columns are optional and dynamic
+  const headers = Object.keys(data[0]);
+
+  // Check that 'number' column exists
+  if (!headers.includes('number')) {
+    console.error('CSV validation failed: "number" column is required');
     return false;
   }
 
-  // Check if each row has values for at least one of the required fields
-  return data.every(row => expectedHeaders.some(header => row[header] !== ''));
+  // Check that all rows have a number value
+  const allRowsHaveNumber = data.every(row => row.number && row.number.trim() !== '');
+  if (!allRowsHaveNumber) {
+    console.error('CSV validation failed: All rows must have a valid "number" value');
+    return false;
+  }
+
+  // Log detected columns for debugging
+  console.log(`✅ CSV validation passed. Detected columns: ${headers.join(', ')}`);
+
+  return true;
 };
 
 router.post('/lead-push', async(req, res) =>{

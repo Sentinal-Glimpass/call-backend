@@ -14,7 +14,7 @@ class PlivoAdapter {
    */
   static async makeCall(callParams, providerConfig) {
     try {
-      const { from, to, wssUrl, firstName, tag, email, listId, campaignId, clientId } = callParams;
+      const { from, to, wssUrl, firstName, tag, email, listId, campaignId, clientId, dynamicFields } = callParams;
 
       // Use provided config or fall back to environment/defaults
       const accountSid = providerConfig?.accountSid || process.env.PLIVO_ACCOUNT_SID || 'default_account_sid';
@@ -23,16 +23,42 @@ class PlivoAdapter {
       const plivoApiUrl = `https://api.plivo.com/v1/Account/${accountSid}/Call/`;
       const baseUrl = process.env.BASE_URL || 'https://application.glimpass.com';
 
-      // Prepare CSV data (maintain compatibility with existing system)
-      const listDataStringify = JSON.stringify({ firstName: firstName || '', email: email || '', tag: tag || '' });
+      // Prepare contact data with ALL CSV fields (dynamic columns support) - FLAT, NO NESTING
+      const contactData = dynamicFields || {};
       const campId = campaignId || 'direct';
+
+      // Build answer_url with ALL CSV fields as individual query parameters
+      const answerUrlParams = new URLSearchParams({
+        wss: wssUrl,
+        clientId: clientId,
+        listId: listId || 'direct',
+        campId: campId
+      });
+
+      // Add ALL CSV fields as individual query parameters (flat structure)
+      let csvFieldCount = 0;
+      for (const [key, value] of Object.entries(contactData)) {
+        // Skip internal MongoDB fields
+        if (!['_id', 'listId'].includes(key) && value !== undefined && value !== null) {
+          answerUrlParams.append(key, String(value));
+          csvFieldCount++;
+        }
+      }
+
+      // Ensure backward compatibility - add standard fields if not present
+      if (!contactData.firstName && firstName) answerUrlParams.set('firstName', firstName);
+      if (!contactData.first_name && firstName) answerUrlParams.set('first_name', firstName);
+      if (!contactData.email && email) answerUrlParams.set('email', email);
+      if (!contactData.tag && tag) answerUrlParams.set('tag', tag);
+
+      console.log(`📋 [Plivo] Passing ${csvFieldCount} CSV fields as flat query parameters`);
 
       const payload = {
         from,
         to,
         ring_url: `${baseUrl}/plivo/ring-url`,
         hangup_url: `${baseUrl}/plivo/hangup-url?campId=${campId}&hangupFirstName=${firstName || ''}&tag=${tag || ''}`,
-        answer_url: `${baseUrl}/ip/xml-plivo?wss=${wssUrl}&clientId=${clientId}&listId=${listId || 'direct'}&campId=${campId}&firstName=${firstName || ''}&email=${encodeURIComponent(email || '')}&tag=${encodeURIComponent(tag || '')}&csvData=${listDataStringify}`,
+        answer_url: `${baseUrl}/ip/xml-plivo?${answerUrlParams.toString()}`,
         answer_method: 'POST',
       };
       
