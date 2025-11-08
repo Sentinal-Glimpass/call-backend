@@ -27,6 +27,15 @@ class PlivoAdapter {
       const contactData = dynamicFields || {};
       const campId = campaignId || 'direct';
 
+      // DEBUG: Log what we received
+      console.log(`📋 [Plivo Adapter] Received dynamicFields:`, {
+        fieldCount: Object.keys(contactData).length,
+        fields: Object.keys(contactData),
+        email: contactData.email,
+        firstName: firstName,
+        emailParam: email
+      });
+
       // Build answer_url with ALL CSV fields as individual query parameters
       const answerUrlParams = new URLSearchParams({
         wss: wssUrl,
@@ -53,12 +62,18 @@ class PlivoAdapter {
 
       console.log(`📋 [Plivo] Passing ${csvFieldCount} CSV fields as flat query parameters`);
 
+      const answerUrl = `${baseUrl}/ip/xml-plivo?${answerUrlParams.toString()}`;
+
+      // DEBUG: Log the complete answer URL to verify all parameters
+      console.log(`🔗 [Plivo] Answer URL:`, answerUrl.substring(0, 300) + (answerUrl.length > 300 ? '...' : ''));
+      console.log(`🔗 [Plivo] Query params in URL:`, Array.from(answerUrlParams.entries()).map(([k, v]) => `${k}=${v.substring(0, 20)}`));
+
       const payload = {
         from,
         to,
         ring_url: `${baseUrl}/plivo/ring-url`,
         hangup_url: `${baseUrl}/plivo/hangup-url?campId=${campId}&hangupFirstName=${firstName || ''}&tag=${tag || ''}`,
-        answer_url: `${baseUrl}/ip/xml-plivo?${answerUrlParams.toString()}`,
+        answer_url: answerUrl,
         answer_method: 'POST',
       };
       

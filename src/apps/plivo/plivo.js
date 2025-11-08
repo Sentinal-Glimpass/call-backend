@@ -1481,7 +1481,15 @@ async function processEnhancedCampaign(campaignId, listData, fromNumber, wssUrl,
       }
       
       const contact = listData[i];
-      
+
+      // DEBUG: Log contact data to verify email is present
+      console.log(`📋 [Campaign] Contact ${i + 1}:`, {
+        number: contact.number,
+        first_name: contact.first_name,
+        email: contact.email,
+        allFields: Object.keys(contact)
+      });
+
       // Rate limiting logic
       const maxCallsPerMinute = parseInt(process.env.MAX_CALLS_PER_MINUTE) || 10;
       if (callsInLastMinute >= maxCallsPerMinute) {

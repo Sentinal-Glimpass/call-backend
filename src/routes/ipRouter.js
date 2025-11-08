@@ -140,6 +140,15 @@ router.post('/xml-plivo', (req, res) => {
     const Direction = req.body.Direction
     const CallUUID = req.body.CallUUID
 
+    // DEBUG: Log all received query parameters
+    console.log(`📋 [XML] Received query params:`, {
+        system: { wss: wss?.substring(0, 50), listId, clientId, campId },
+        allParams: Object.keys(req.query),
+        csvFields: Object.keys(allQueryParams),
+        email: allQueryParams.email || req.query.email,
+        firstName: allQueryParams.firstName || allQueryParams.first_name
+    });
+
     const sanitizeNumber = (num) => {
         if (!num) return null; // Handle case where num is undefined or null
         return num.replace(/^\+/, ''); // Remove leading '+'
