@@ -116,14 +116,19 @@ class GmailMCPServer extends BaseMCPServer {
       let htmlBody = '';
       let textBody = '';
 
-      if (html) {
-        // Already HTML, use as-is
+      // Detect if content is actually HTML or just plain text
+      // Check for common HTML tags (even if stored in body_html field)
+      const hasHTMLTags = /<(?:br|p|div|span|strong|em|h[1-6]|ul|ol|li|table|tr|td|a)\b[^>]*>/i.test(emailBody);
+      console.log(`📧 Content has HTML tags:`, hasHTMLTags);
+
+      if (hasHTMLTags) {
+        // Content is actual HTML
         htmlBody = emailBody;
         textBody = emailBody.replace(/<br\s*\/?>/gi, '\n').replace(/<[^>]+>/g, '');
       } else {
-        // Plain text: construct proper HTML from it
+        // Content is plain text (even if it came from body_html field)
+        // Treat as plain text and convert to proper HTML
         textBody = emailBody;
-        // Convert plain text to HTML with proper structure
         const htmlContent = emailBody
           .replace(/&/g, '&amp;')
           .replace(/</g, '&lt;')
