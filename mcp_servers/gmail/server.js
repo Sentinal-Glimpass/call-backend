@@ -103,11 +103,18 @@ class GmailMCPServer extends BaseMCPServer {
       });
 
       // Prepare email options
+      // Convert plain text newlines to HTML breaks if not already HTML
+      let emailBody = body;
+      if (!html) {
+        // Convert newlines to HTML breaks for proper display in Gmail
+        emailBody = body.replace(/\n/g, '<br>');
+      }
+
       const mailOptions = {
         from: credentials.gmail_user,
         to: to,
         subject: subject,
-        ...(html ? { html: body } : { text: body })
+        html: emailBody  // Always send as HTML to preserve formatting
       };
 
       if (cc) mailOptions.cc = cc;
