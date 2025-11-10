@@ -43,11 +43,16 @@ class GmailMCPServer extends BaseMCPServer {
         }
 
         // Replace variables in template (missing vars will be replaced with empty string)
+        console.log(`📧 Template body_text exists:`, !!template.body_text);
+        console.log(`📧 Template body_html exists:`, !!template.body_html);
+        console.log(`📧 Raw template body_text:`, template.body_text ? template.body_text.substring(0, 100) : 'NONE');
+
         const subject = replaceTemplateVariables(template.subject, templateVars);
         const body = replaceTemplateVariables(template.body_text || template.body_html, templateVars);
 
         console.log(`📧 Sending template email to ${to}`);
         console.log(`📧 Template vars:`, Object.keys(templateVars));
+        console.log(`📧 Body after template replacement:`, body ? body.substring(0, 100) : 'EMPTY');
 
         // Send email using the internal send method
         return await this.sendEmail({
@@ -103,18 +108,46 @@ class GmailMCPServer extends BaseMCPServer {
       });
 
       // Prepare email options
-      // Convert plain text newlines to HTML breaks if not already HTML
-      let emailBody = body;
-      if (!html) {
-        // Convert newlines to HTML breaks for proper display in Gmail
-        emailBody = body.replace(/\n/g, '<br>');
+      console.log(`📧 Original body length: ${body ? body.length : 0}`);
+      console.log(`📧 Body preview:`, body ? body.substring(0, 100) : 'EMPTY');
+      console.log(`📧 HTML flag:`, html);
+
+      let emailBody = body || '';
+      let htmlBody = '';
+      let textBody = '';
+
+      if (html) {
+        // Already HTML, use as-is
+        htmlBody = emailBody;
+        textBody = emailBody.replace(/<br\s*\/?>/gi, '\n').replace(/<[^>]+>/g, '');
+      } else {
+        // Plain text: construct proper HTML from it
+        textBody = emailBody;
+        // Convert plain text to HTML with proper structure
+        const htmlContent = emailBody
+          .replace(/&/g, '&amp;')
+          .replace(/</g, '&lt;')
+          .replace(/>/g, '&gt;')
+          .replace(/\n/g, '<br>\n');
+
+        htmlBody = `<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+</head>
+<body style="font-family: Arial, sans-serif; line-height: 1.6; color: #333; max-width: 600px; margin: 0 auto; padding: 20px;">
+  ${htmlContent}
+</body>
+</html>`;
       }
 
       const mailOptions = {
         from: credentials.gmail_user,
         to: to,
         subject: subject,
-        html: emailBody  // Always send as HTML to preserve formatting
+        text: textBody,
+        html: htmlBody
       };
 
       if (cc) mailOptions.cc = cc;
