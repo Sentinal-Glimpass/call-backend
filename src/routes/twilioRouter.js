@@ -45,7 +45,7 @@ const { connectToMongo, client } = require('../../models/mongodb.js');
  */
 router.post('/twiml', (req, res) => {
   try {
-    const { wss, clientId, campId, listId, preUUID, ...allQueryParams } = req.query;
+    const { wss, clientId, campId, listId, preUUID } = req.query;
     const { CallSid, From, To } = req.body;
 
     console.log(`🔵 Twilio TwiML request:`);
@@ -65,22 +65,20 @@ router.post('/twiml', (req, res) => {
       return res.type('application/xml').send(errorTwiML);
     }
 
-    // Generate TwiML response with all query parameters (flat structure, all CSV fields passed individually)
+    // Generate TwiML response
     const twiml = TwilioAdapter.generateTwiML({
       wssUrl: wss,
-      callSid: preUUID || CallSid, // Use our pre-generated UUID if available
+      callSid: preUUID || CallSid,
       clientId: clientId,
       campaignId: campId,
       listId: listId,
       from: From,
-      to: To,
-      twilioCallSid: CallSid, // Keep Twilio CallSid for debugging
-      ...allQueryParams // Spread ALL remaining query params (CSV fields passed flat)
+      to: To
     });
-    
+
     console.log(`✅ Generated TwiML for call ${CallSid}`);
     res.type('application/xml').send(twiml);
-    
+
   } catch (error) {
     console.error('❌ Error generating TwiML:', error);
     const errorTwiML = `<?xml version="1.0" encoding="UTF-8"?>

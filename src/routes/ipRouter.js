@@ -134,24 +134,15 @@ router.get('/release-session', authenticateToken, auditLog, async(req,res) => {
 })
 
 router.post('/xml-plivo', (req, res) => {
-    const { wss, listId, clientId, campId, ...allQueryParams } = req.query;
+    const { wss, listId, clientId, campId } = req.query;
     const from = req.body.From
     const to = req.body.To
     const Direction = req.body.Direction
     const CallUUID = req.body.CallUUID
 
-    // DEBUG: Log all received query parameters
-    console.log(`📋 [XML] Received query params:`, {
-        system: { wss: wss?.substring(0, 50), listId, clientId, campId },
-        allParams: Object.keys(req.query),
-        csvFields: Object.keys(allQueryParams),
-        email: allQueryParams.email || req.query.email,
-        firstName: allQueryParams.firstName || allQueryParams.first_name
-    });
-
     const sanitizeNumber = (num) => {
-        if (!num) return null; // Handle case where num is undefined or null
-        return num.replace(/^\+/, ''); // Remove leading '+'
+        if (!num) return null;
+        return num.replace(/^\+/, '');
     };
 
     let sanitizedFrom = sanitizeNumber(from);
@@ -161,8 +152,8 @@ router.post('/xml-plivo', (req, res) => {
         sanitizedTo = sanitizeNumber(from);
     }
 
-    // Build extraHeaders from ALL query parameters (flat structure, no nesting)
-    let extraHeadersArray = [
+    // Build extraHeaders with minimal system fields only
+    const extraHeaders = [
         `from=${sanitizedFrom}`,
         `to=${sanitizedTo}`,
         `callUUID=${CallUUID}`,
@@ -170,25 +161,10 @@ router.post('/xml-plivo', (req, res) => {
         `clientId=${clientId}`,
         `campId=${campId}`,
         `provider=plivo`
-    ];
+    ].join(',');
 
-    // Add ALL remaining query parameters as headers (these are CSV fields passed flat)
-    const systemFields = ['wss', 'listId', 'clientId', 'campId', 'from', 'to', 'callUUID', 'provider'];
-    let csvFieldCount = 0;
-
-    for (const [key, value] of Object.entries(allQueryParams)) {
-        // Skip system fields and internal fields
-        if (!systemFields.includes(key) && !['_id'].includes(key) && value) {
-            // Sanitize value for header (escape commas and equals)
-            const sanitizedValue = String(value).replace(/,/g, '%2C').replace(/=/g, '%3D');
-            extraHeadersArray.push(`${key}=${sanitizedValue}`);
-            csvFieldCount++;
-        }
-    }
-
-    console.log(`✅ [XML] Generated ${extraHeadersArray.length} total headers (${csvFieldCount} from CSV fields)`);
-
-    const extraHeaders = extraHeadersArray.join(',');
+    console.log(`✅ [XML] Generated extraHeaders (${extraHeaders.length} chars)`);
+    console.log(`🔗 [XML] extraHeaders:`, extraHeaders);
 
     // Get base URL from environment variable, fallback to default if not set
     const baseUrl = process.env.BASE_URL || 'https://application.glimpass.com';

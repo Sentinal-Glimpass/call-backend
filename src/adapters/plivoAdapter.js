@@ -23,20 +23,9 @@ class PlivoAdapter {
       const plivoApiUrl = `https://api.plivo.com/v1/Account/${accountSid}/Call/`;
       const baseUrl = process.env.BASE_URL || 'https://application.glimpass.com';
 
-      // Prepare contact data with ALL CSV fields (dynamic columns support) - FLAT, NO NESTING
-      const contactData = dynamicFields || {};
       const campId = campaignId || 'direct';
 
-      // DEBUG: Log what we received
-      console.log(`📋 [Plivo Adapter] Received dynamicFields:`, {
-        fieldCount: Object.keys(contactData).length,
-        fields: Object.keys(contactData),
-        email: contactData.email,
-        firstName: firstName,
-        emailParam: email
-      });
-
-      // Build answer_url with ALL CSV fields as individual query parameters
+      // Build answer_url with minimal parameters
       const answerUrlParams = new URLSearchParams({
         wss: wssUrl,
         clientId: clientId,
@@ -44,29 +33,9 @@ class PlivoAdapter {
         campId: campId
       });
 
-      // Add ALL CSV fields as individual query parameters (flat structure)
-      let csvFieldCount = 0;
-      for (const [key, value] of Object.entries(contactData)) {
-        // Skip internal MongoDB fields
-        if (!['_id', 'listId'].includes(key) && value !== undefined && value !== null) {
-          answerUrlParams.append(key, String(value));
-          csvFieldCount++;
-        }
-      }
-
-      // Ensure backward compatibility - add standard fields if not present
-      if (!contactData.firstName && firstName) answerUrlParams.set('firstName', firstName);
-      if (!contactData.first_name && firstName) answerUrlParams.set('first_name', firstName);
-      if (!contactData.email && email) answerUrlParams.set('email', email);
-      if (!contactData.tag && tag) answerUrlParams.set('tag', tag);
-
-      console.log(`📋 [Plivo] Passing ${csvFieldCount} CSV fields as flat query parameters`);
-
       const answerUrl = `${baseUrl}/ip/xml-plivo?${answerUrlParams.toString()}`;
 
-      // DEBUG: Log the complete answer URL to verify all parameters
-      console.log(`🔗 [Plivo] Answer URL:`, answerUrl.substring(0, 300) + (answerUrl.length > 300 ? '...' : ''));
-      console.log(`🔗 [Plivo] Query params in URL:`, Array.from(answerUrlParams.entries()).map(([k, v]) => `${k}=${v.substring(0, 20)}`));
+      console.log(`🔗 [Plivo] Answer URL:`, answerUrl);
 
       const payload = {
         from,

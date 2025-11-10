@@ -1517,7 +1517,7 @@ async function processEnhancedCampaign(campaignId, listData, fromNumber, wssUrl,
         console.warn(`⚠️ Could not extract assistantId from wssUrl: ${wssUrl}`);
         assistantId = contact.tag ?? ''; // Fallback to contact tag
       }
-      
+
       // Process single call using unified system with assistantId as tag for billing
       // Pass full contact object to support dynamic CSV columns
       const callResult = await processSingleCall({

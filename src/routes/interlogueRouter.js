@@ -185,15 +185,66 @@ router.post('/get-assistant', authenticateToken, validateResourceOwnership, audi
 router.post('/get-assistant-details', async (req, res) => {
     try {
         // Check master key
-        const { master_key_sprscrt, assistantId } = req.body;
-        
+        const { master_key_sprscrt, assistantId, customerNumber, listId } = req.body;
+
         if (!master_key_sprscrt || master_key_sprscrt !== process.env.MASTER_KEY) {
             return res.status(401).json({ error: "Invalid master key" });
         }
 
         const start = Date.now(); // Start time
-        // const assistantId ='682e303a512eed969b57ce33';
-        const result = await getAssistantDetails(assistantId);
+        let result = await getAssistantDetails(assistantId);
+
+        // If customerNumber and listId are provided, fetch CSV data and append to system prompt
+        if (customerNumber && listId && result) {
+            console.log(`📋 Fetching customer data for number: ${customerNumber}, listId: ${listId}`);
+
+            try {
+                const { getContactsFromList } = require('../apps/plivo/plivo.js');
+                const contactResult = await getContactsFromList(customerNumber, listId);
+
+                if (contactResult.status === 200 && contactResult.data && contactResult.data.length > 0) {
+                    const contact = contactResult.data[0]; // Get first matching contact
+                    console.log(`✅ Found customer data:`, contact);
+
+                    // Format customer data as readable text
+                    let customerDataText = '\n\n--- Customer Information ---\n';
+
+                    // Add all CSV fields except internal ones
+                    for (const [key, value] of Object.entries(contact)) {
+                        if (!['_id', 'listId'].includes(key) && value) {
+                            // Format field name (e.g., first_name -> First Name)
+                            const fieldName = key.replace(/_/g, ' ')
+                                .split(' ')
+                                .map(word => word.charAt(0).toUpperCase() + word.slice(1))
+                                .join(' ');
+                            customerDataText += `${fieldName}: ${value}\n`;
+                        }
+                    }
+
+                    // Append to system prompt at correct location: agent_prompts.task_1.system_prompt
+                    if (result.payload && result.payload.agent_prompts && result.payload.agent_prompts.task_1 && result.payload.agent_prompts.task_1.system_prompt) {
+                        result.payload.agent_prompts.task_1.system_prompt += customerDataText;
+                        console.log(`✅ Appended customer data to payload.agent_prompts.task_1.system_prompt`);
+                    } else if (result.agent_prompts && result.agent_prompts.task_1 && result.agent_prompts.task_1.system_prompt) {
+                        result.agent_prompts.task_1.system_prompt += customerDataText;
+                        console.log(`✅ Appended customer data to agent_prompts.task_1.system_prompt`);
+                    } else {
+                        console.warn(`⚠️ Could not find system_prompt field in expected location. Available keys:`, Object.keys(result));
+                        if (result.payload) {
+                            console.warn(`   payload keys:`, Object.keys(result.payload));
+                        }
+                    }
+
+                    console.log(`📝 Customer data formatted and appended`);
+                } else {
+                    console.log(`⚠️ No customer data found for number: ${customerNumber}`);
+                }
+            } catch (csvError) {
+                console.error(`❌ Error fetching customer data:`, csvError);
+                // Continue without customer data - don't fail the entire request
+            }
+        }
+
         const end = Date.now(); // End time
         console.log(`API Response Time: ${end - start}ms`);
         res.json(result)
