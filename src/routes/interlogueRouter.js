@@ -194,18 +194,22 @@ router.post('/get-assistant-details', async (req, res) => {
         const start = Date.now(); // Start time
         let result = await getAssistantDetails(assistantId);
 
-        // If customerNumber and listId are provided, fetch data and append to system prompt
-        if (customerNumber && listId && result) {
-            console.log(`📋 Fetching customer data for number: ${customerNumber}, listId: ${listId}`);
+        console.log(`📋 get-assistant-details called - customerNumber: ${customerNumber || 'NOT PROVIDED'}, listId: ${listId || 'NOT PROVIDED'}`);
+
+        // If customerNumber is provided, fetch data and append to system prompt
+        // listId determines source: 'api-call'/'testcall' = activeCalls, ObjectId = campaign, missing = try activeCalls first
+        if (customerNumber && result) {
+            const effectiveListId = listId || 'api-call'; // Default to api-call if not provided
+            console.log(`📋 Fetching customer data for number: ${customerNumber}, listId: ${effectiveListId}`);
 
             try {
                 let contact = null;
                 let contextFlags = { includeGlobalContext: false, includeAgentContext: false };
 
                 // Determine if this is a single call or campaign based on listId
-                if (listId === 'testcall' || listId === 'api-call') {
+                if (effectiveListId === 'testcall' || effectiveListId === 'api-call') {
                     // SINGLE CALL: Look up activeCalls collection
-                    console.log(`🔍 Single call detected (listId: ${listId}), looking up activeCalls...`);
+                    console.log(`🔍 Single call detected (effectiveListId: ${effectiveListId}), looking up activeCalls...`);
 
                     const { connectToMongo, client: mongoClient } = require('../../models/mongodb.js');
                     await connectToMongo();
@@ -233,9 +237,9 @@ router.post('/get-assistant-details', async (req, res) => {
                     }
                 } else {
                     // CAMPAIGN: Look up plivo-list-data collection (existing behavior)
-                    console.log(`🔍 Campaign call detected (listId: ${listId}), looking up plivo-list-data...`);
+                    console.log(`🔍 Campaign call detected (effectiveListId: ${effectiveListId}), looking up plivo-list-data...`);
                     const { getContactsFromList } = require('../apps/plivo/plivo.js');
-                    const contactResult = await getContactsFromList(customerNumber, listId);
+                    const contactResult = await getContactsFromList(customerNumber, effectiveListId);
 
                     if (contactResult.status === 200 && contactResult.data && contactResult.data.length > 0) {
                         contact = contactResult.data[0]; // Get first matching contact
@@ -275,7 +279,7 @@ router.post('/get-assistant-details', async (req, res) => {
                         }
                     }
 
-                    console.log(`📝 Customer data formatted and appended`);
+                    console.log(`📝 Customer data formatted and appended. Data text:\n${customerDataText}`);
 
                     // NEW: Fetch and append memory context if flags are enabled
                     if (contextFlags.includeGlobalContext || contextFlags.includeAgentContext) {
@@ -310,6 +314,7 @@ router.post('/get-assistant-details', async (req, res) => {
                                 const memory = await memoryCollection.findOne(memoryQuery);
 
                                 if (memory) {
+                                    console.log(`✅ Found conversation memory:`, JSON.stringify(memory, null, 2));
                                     let contextText = '\n\n--- Previous Conversation Context ---\n';
 
                                     if (contextFlags.includeGlobalContext && memory.globalContext) {
@@ -326,12 +331,14 @@ router.post('/get-assistant-details', async (req, res) => {
                                     if (result.payload && result.payload.agent_prompts && result.payload.agent_prompts.task_1 && result.payload.agent_prompts.task_1.system_prompt) {
                                         result.payload.agent_prompts.task_1.system_prompt += contextText;
                                         console.log(`✅ Appended conversation context to payload.agent_prompts.task_1.system_prompt`);
+                                        console.log(`🧠 Memory context appended:\n${contextText}`);
                                     } else if (result.agent_prompts && result.agent_prompts.task_1 && result.agent_prompts.task_1.system_prompt) {
                                         result.agent_prompts.task_1.system_prompt += contextText;
                                         console.log(`✅ Appended conversation context to agent_prompts.task_1.system_prompt`);
+                                        console.log(`🧠 Memory context appended:\n${contextText}`);
                                     }
                                 } else {
-                                    console.log(`⚠️ No conversation memory found for this customer`);
+                                    console.log(`⚠️ No conversation memory found for this customer (query: ${JSON.stringify(memoryQuery)})`);
                                 }
                             } else {
                                 console.warn(`⚠️ Could not determine clientId from assistant`);
