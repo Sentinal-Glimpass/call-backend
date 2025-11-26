@@ -25,6 +25,7 @@ const safeFileDelete = (filePath) => {
  */
 
 const {deleteList,insertList, insertListContent,updateList, saveSingleLeadData   } = require('./../apps/plivo/plivo.js')
+const apiKeyValidator = require('./../middleware/apiKeyValidator')
 // Route to upload CSV
 router.post('/upload-csv', upload.single('file'), async (req, res) => {
   const filePath = req.file.path;
@@ -258,7 +259,7 @@ router.post('/lead-push', async(req, res) =>{
  *       500:
  *         description: Internal server error
  */
-router.post('/single-call', async(req, res) => {
+router.post('/single-call', apiKeyValidator, async(req, res) => {
   try {
     const { number, assistantId, wssUrl, fromNumber, firstName, email, tag, provider, includeGlobalContext, includeAgentContext, global_context, Agent_context, ...customFields } = req.body;
     const clientData = req.clientData; // From API key middleware

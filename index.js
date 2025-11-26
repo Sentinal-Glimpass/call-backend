@@ -253,7 +253,7 @@ app.use('/plivo', plivoRouter);
 app.use('/exotel', exotelRouter);
 app.use('/ip', ipRouter);
 app.use('/health', healthRouter);
-app.use('/api', apiKeyValidator, plivoApiRouter)
+app.use('/api', plivoApiRouter)
 
 // MarkAible AI Service Routes (using exact original endpoints)
 app.use('/api/create-ai', markaibleAiRouter);
