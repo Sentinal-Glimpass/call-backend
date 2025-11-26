@@ -253,7 +253,7 @@ router.post('/lead-push', async(req, res) =>{
  *       401:
  *         description: Unauthorized - API key missing
  *       403:
- *         description: Forbidden - Invalid API key
+ *         description: Forbidden - Invalid API key or assistant does not belong to client
  *       404:
  *         description: Assistant not found
  *       500:
@@ -272,7 +272,7 @@ router.post('/single-call', apiKeyValidator, async(req, res) => {
       });
     }
 
-    // Verify assistant exists
+    // Verify assistant exists and belongs to this client
     const { getAssistantDetails } = require('./../apps/interLogue/client.js');
     const assistantData = await getAssistantDetails(assistantId);
 
@@ -280,6 +280,15 @@ router.post('/single-call', apiKeyValidator, async(req, res) => {
       return res.status(404).json({
         success: false,
         message: `Assistant not found with ID: ${assistantId}`
+      });
+    }
+
+    // Verify assistant belongs to the client making the request
+    if (assistantData.clientId !== clientData._id.toString()) {
+      console.log(`⚠️ Unauthorized assistant access attempt - Client: ${clientData.name} (${clientData._id}) tried to use assistant: ${assistantId} belonging to client: ${assistantData.clientId}`);
+      return res.status(403).json({
+        success: false,
+        message: 'You do not have permission to use this assistant'
       });
     }
 

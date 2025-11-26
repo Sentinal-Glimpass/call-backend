@@ -78,7 +78,8 @@ class TelephonyCredentialsService {
           ...decryptedCredentials,
           metadata: credentialRecord.metadata,
           isClientSpecific: true,
-          lastUsed: credentialRecord.lastUsed
+          lastUsed: credentialRecord.lastUsed,
+          validatedPhoneNumbers: credentialRecord.validationResult?.phoneNumbers || []
         };
       }
       
@@ -223,7 +224,7 @@ class TelephonyCredentialsService {
         updatedAt: new Date()
       };
       
-      // Encrypt sensitive fields if provided
+      // Encrypt sensitive fields if provided - use dot notation for nested credentials
       if (updates.accountSid) {
         const validation = this.validateCredentials(provider, updates);
         if (!validation.valid) {
@@ -232,11 +233,11 @@ class TelephonyCredentialsService {
             error: validation.error
           };
         }
-        updateData.accountSid = this.encrypt(updates.accountSid);
+        updateData['credentials.accountSid'] = this.encrypt(updates.accountSid);
       }
-      
+
       if (updates.authToken) {
-        updateData.authToken = this.encrypt(updates.authToken);
+        updateData['credentials.authToken'] = this.encrypt(updates.authToken);
       }
       
       // Handle other fields

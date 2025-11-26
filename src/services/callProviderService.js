@@ -60,8 +60,20 @@ class CallProviderService {
         finalCredentials = TelephonyCredentialsService.getSystemDefaultCredentials(providerInfo.provider, 'unknown');
       }
       
+      // Verify phone number ownership for client-specific credentials
+      if (finalCredentials.isClientSpecific && finalCredentials.validatedPhoneNumbers?.length > 0) {
+        const normalizedFrom = from.replace(/^\+/, '').replace(/\s+/g, '');
+        const ownsNumber = finalCredentials.validatedPhoneNumbers.some(
+          num => num.phoneNumber === normalizedFrom || num.phoneNumber === from
+        );
+        if (!ownsNumber) {
+          console.log(`⚠️ FROM number ${from} not in client's validated numbers, falling back to system credentials`);
+          finalCredentials = TelephonyCredentialsService.getSystemDefaultCredentials(providerInfo.provider, clientId);
+        }
+      }
+
       console.log(`🔑 Using ${finalCredentials.isClientSpecific ? 'client-specific' : 'system default'} credentials`);
-      
+
       let callResult;
       
       switch (providerInfo.provider) {
