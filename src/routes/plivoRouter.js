@@ -52,7 +52,7 @@ const {
  *   name: Plivo
  *   description: Plivo SMS/voice operations and campaign management
  */
-const{ retryCampaign, getIncomingBilling,  updateIncomingClientBalance, getCampaignStatus, getContactsFromList, insertList, getIncomingReport, getContactfromListId, saveHangupData, insertListContent, updateList, getListByClientId, initiatePlivoCall, makeCallViaCampaign, getCampaignByClientId, saveRecordData, getReportByCampId, deleteList, cancelCampaign, pauseCampaign, resumeCampaign, getCampaignProgress, getTestCallReport, validateClientBalance, getCurrentClientBalance, getCampaignAnalytics, getClientAnalytics} = require('../apps/plivo/plivo');
+const{ retryCampaign, getIncomingBilling,  updateIncomingClientBalance, getCampaignStatus, getContactsFromList, insertList, getIncomingReport, getContactfromListId, saveHangupData, insertListContent, updateList, getListByClientId, initiatePlivoCall, makeCallViaCampaign, getCampaignByClientId, saveRecordData, getReportByCampId, deleteList, cancelCampaign, pauseCampaign, resumeCampaign, getCampaignProgress, getTestCallReport, getApiCallReport, validateClientBalance, getCurrentClientBalance, getCampaignAnalytics, getClientAnalytics} = require('../apps/plivo/plivo');
 
 // Validation schemas for Plivo endpoints
 const validationSchemas = {
@@ -479,7 +479,7 @@ router.post('/get-list-contact', authenticateToken, validateResourceOwnership, a
 })
 router.post('/single-call', authenticateToken, validateResourceOwnership, validationSchemas.singleCallValidation, auditLog, async(req, res) =>{
     try{
-        const { from, to, wssUrl, clientId, assistantId, customPrompt, provider } = req.body;
+        const { from, to, wssUrl, clientId, assistantId, customPrompt, provider, includeGlobalContext, includeAgentContext } = req.body;
         
         // Validate client balance before making test call - simple <= 0 check
         const balanceCheck = await getCurrentClientBalance(clientId);
@@ -554,11 +554,16 @@ router.post('/single-call', authenticateToken, validateResourceOwnership, valida
             firstName: customPrompt || '',
             tag: assistantId,
             listId: 'testcall',
-            provider: provider, // Pass the provider parameter 
+            provider: provider, // Pass the provider parameter
             // Additional params for proper tracking
             contactIndex: 0,
             sequenceNumber: 1,
-            contactData: { first_name: customPrompt || '', number: to }
+            contactData: { first_name: customPrompt || '', number: to },
+            // NEW: Context flags for memory system
+            contextFlags: {
+                includeGlobalContext: includeGlobalContext || false,
+                includeAgentContext: includeAgentContext || false
+            }
         };
         
         console.log('🚀 Initiating single call via processSingleCall (with tracking)...');
@@ -1410,6 +1415,66 @@ router.post('/get-test-call-report', authenticateToken, validateResourceOwnershi
   try{
     const clientId = req.body.clientId;
     const result = await getTestCallReport(clientId)
+    if(result.status == 404){
+      res.status(404).send({ message: result.message });
+      return;
+    }
+    res.status(result.status).send(result)
+  } catch(error) {
+    res.status(500).send({ message: "Internal Server Error", error });
+  }
+})
+
+/**
+ * @swagger
+ * /plivo/get-api-call-report:
+ *   post:
+ *     tags: [Plivo]
+ *     summary: Get API call report (calls initiated via API key)
+ *     description: Fetches all calls initiated via API key (campId='api-call') with full enrichment (logData, recordings, lead analysis)
+ *     security:
+ *       - BearerAuth: []
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - clientId
+ *             properties:
+ *               clientId:
+ *                 type: string
+ *                 description: Client ID to fetch API call reports for
+ *     responses:
+ *       200:
+ *         description: API call report fetched successfully
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 status:
+ *                   type: number
+ *                   example: 200
+ *                 data:
+ *                   type: array
+ *                   description: Array of API call records with enriched data
+ *                 totalDuration:
+ *                   type: number
+ *                   description: Total duration of all API calls in seconds
+ *                 message:
+ *                   type: string
+ *                   example: "API call data fetched successfully with enriched information."
+ *       404:
+ *         description: No API call data found
+ *       500:
+ *         description: Internal server error
+ */
+router.post('/get-api-call-report', authenticateToken, validateResourceOwnership, auditLog, async(req, res) =>{
+  try{
+    const clientId = req.body.clientId;
+    const result = await getApiCallReport(clientId)
     if(result.status == 404){
       res.status(404).send({ message: result.message });
       return;

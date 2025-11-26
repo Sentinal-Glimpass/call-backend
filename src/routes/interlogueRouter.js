@@ -194,17 +194,57 @@ router.post('/get-assistant-details', async (req, res) => {
         const start = Date.now(); // Start time
         let result = await getAssistantDetails(assistantId);
 
-        // If customerNumber and listId are provided, fetch CSV data and append to system prompt
+        // If customerNumber and listId are provided, fetch data and append to system prompt
         if (customerNumber && listId && result) {
             console.log(`📋 Fetching customer data for number: ${customerNumber}, listId: ${listId}`);
 
             try {
-                const { getContactsFromList } = require('../apps/plivo/plivo.js');
-                const contactResult = await getContactsFromList(customerNumber, listId);
+                let contact = null;
+                let contextFlags = { includeGlobalContext: false, includeAgentContext: false };
 
-                if (contactResult.status === 200 && contactResult.data && contactResult.data.length > 0) {
-                    const contact = contactResult.data[0]; // Get first matching contact
-                    console.log(`✅ Found customer data:`, contact);
+                // Determine if this is a single call or campaign based on listId
+                if (listId === 'testcall' || listId === 'api-call') {
+                    // SINGLE CALL: Look up activeCalls collection
+                    console.log(`🔍 Single call detected (listId: ${listId}), looking up activeCalls...`);
+
+                    const { connectToMongo, client: mongoClient } = require('../../models/mongodb.js');
+                    await connectToMongo();
+                    const database = mongoClient.db("talkGlimpass");
+                    const activeCallsCollection = database.collection("activeCalls");
+
+                    // Normalize phone number - extract last 10 digits for matching
+                    const normalizedNumber = customerNumber.slice(-10);
+
+                    // Find active call by phone number (match last 10 digits)
+                    const activeCall = await activeCallsCollection.findOne({
+                        to: { $regex: normalizedNumber + "$" },
+                        status: { $in: ['processed', 'ringing', 'ongoing'] } // Active or recent calls
+                    }, {
+                        sort: { createdAt: -1 } // Get most recent
+                    });
+
+                    if (activeCall) {
+                        contact = activeCall.contactData;
+                        contextFlags = activeCall.contextFlags || contextFlags;
+                        console.log(`✅ Found active call data:`, contact);
+                        console.log(`🎯 Context flags:`, contextFlags);
+                    } else {
+                        console.log(`⚠️ No active call found for number: ${customerNumber}`);
+                    }
+                } else {
+                    // CAMPAIGN: Look up plivo-list-data collection (existing behavior)
+                    console.log(`🔍 Campaign call detected (listId: ${listId}), looking up plivo-list-data...`);
+                    const { getContactsFromList } = require('../apps/plivo/plivo.js');
+                    const contactResult = await getContactsFromList(customerNumber, listId);
+
+                    if (contactResult.status === 200 && contactResult.data && contactResult.data.length > 0) {
+                        contact = contactResult.data[0]; // Get first matching contact
+                        console.log(`✅ Found campaign contact data:`, contact);
+                        // TODO: In future, get context flags from campaign settings
+                    }
+                }
+
+                if (contact) {
 
                     // Format customer data as readable text
                     let customerDataText = '\n\n--- Customer Information ---\n';
@@ -236,6 +276,71 @@ router.post('/get-assistant-details', async (req, res) => {
                     }
 
                     console.log(`📝 Customer data formatted and appended`);
+
+                    // NEW: Fetch and append memory context if flags are enabled
+                    if (contextFlags.includeGlobalContext || contextFlags.includeAgentContext) {
+                        console.log(`🧠 Fetching conversation memory (global: ${contextFlags.includeGlobalContext}, agent: ${contextFlags.includeAgentContext})...`);
+
+                        try {
+                            const { connectToMongo, client: mongoClient } = require('../../models/mongodb.js');
+                            await connectToMongo();
+                            const database = mongoClient.db("talkGlimpass");
+                            const memoryCollection = database.collection("conversationMemory");
+                            const { ObjectId } = require('mongodb');
+
+                            // Get assistant to determine clientId
+                            const assistantCollection = database.collection("assistant");
+                            const assistant = await assistantCollection.findOne({ _id: new ObjectId(assistantId) });
+
+                            if (assistant && assistant.clientId) {
+                                // Normalize phone number - last 10 digits
+                                const normalizedPhone = customerNumber.slice(-10);
+
+                                // Build query based on context flags
+                                const memoryQuery = {
+                                    phoneNumber: normalizedPhone,
+                                    clientId: new ObjectId(assistant.clientId)
+                                };
+
+                                // If agent context is needed, add assistantId to query
+                                if (contextFlags.includeAgentContext) {
+                                    memoryQuery.assistantId = new ObjectId(assistantId);
+                                }
+
+                                const memory = await memoryCollection.findOne(memoryQuery);
+
+                                if (memory) {
+                                    let contextText = '\n\n--- Previous Conversation Context ---\n';
+
+                                    if (contextFlags.includeGlobalContext && memory.globalContext) {
+                                        contextText += '\n[All interactions with this customer]:\n';
+                                        contextText += memory.globalContext + '\n';
+                                    }
+
+                                    if (contextFlags.includeAgentContext && memory.agentContext) {
+                                        contextText += '\n[Interactions with this specific assistant]:\n';
+                                        contextText += memory.agentContext + '\n';
+                                    }
+
+                                    // Append context to system prompt
+                                    if (result.payload && result.payload.agent_prompts && result.payload.agent_prompts.task_1 && result.payload.agent_prompts.task_1.system_prompt) {
+                                        result.payload.agent_prompts.task_1.system_prompt += contextText;
+                                        console.log(`✅ Appended conversation context to payload.agent_prompts.task_1.system_prompt`);
+                                    } else if (result.agent_prompts && result.agent_prompts.task_1 && result.agent_prompts.task_1.system_prompt) {
+                                        result.agent_prompts.task_1.system_prompt += contextText;
+                                        console.log(`✅ Appended conversation context to agent_prompts.task_1.system_prompt`);
+                                    }
+                                } else {
+                                    console.log(`⚠️ No conversation memory found for this customer`);
+                                }
+                            } else {
+                                console.warn(`⚠️ Could not determine clientId from assistant`);
+                            }
+                        } catch (memoryError) {
+                            console.error(`❌ Error fetching conversation memory:`, memoryError);
+                            // Continue without memory - don't fail the entire request
+                        }
+                    }
                 } else {
                     console.log(`⚠️ No customer data found for number: ${customerNumber}`);
                 }
@@ -250,6 +355,57 @@ router.post('/get-assistant-details', async (req, res) => {
         res.json(result)
     } catch (error) {
         res.status(500).send({ message: "Internal Server Error", error });
+    }
+});
+
+/**
+ * Save or update conversation context (memory)
+ * Called by bot after call ends to store conversation summary
+ */
+router.post('/save-conversation-context', async (req, res) => {
+    try {
+        // Check master key
+        const { master_key_sprscrt, phoneNumber, clientId, assistantId, globalContext, agentContext } = req.body;
+
+        if (!master_key_sprscrt || master_key_sprscrt !== process.env.MASTER_KEY) {
+            return res.status(401).json({
+                success: false,
+                error: "Invalid master key"
+            });
+        }
+
+        // Validate required fields
+        if (!phoneNumber || !clientId || !assistantId) {
+            return res.status(400).json({
+                success: false,
+                message: 'Required fields: phoneNumber, clientId, assistantId'
+            });
+        }
+
+        const { saveConversationContext } = require('../apps/helper/conversationMemory.js');
+
+        const result = await saveConversationContext({
+            phoneNumber,
+            clientId,
+            assistantId,
+            globalContext,
+            agentContext
+        });
+
+        res.status(result.status).json({
+            success: result.success,
+            message: result.message,
+            upserted: result.upserted,
+            updated: result.updated
+        });
+
+    } catch (error) {
+        console.error('❌ Error in save-conversation-context:', error);
+        res.status(500).json({
+            success: false,
+            message: "Internal Server Error",
+            error: error.message
+        });
     }
 });
 

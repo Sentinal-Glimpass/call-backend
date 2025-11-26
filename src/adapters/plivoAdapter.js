@@ -25,13 +25,27 @@ class PlivoAdapter {
 
       const campId = campaignId || 'direct';
 
-      // Build answer_url with minimal parameters
+      // Build answer_url with all parameters including dynamic CSV fields
       const answerUrlParams = new URLSearchParams({
         wss: wssUrl,
         clientId: clientId,
         listId: listId || 'direct',
         campId: campId
       });
+
+      // Add ALL dynamic CSV fields as individual query parameters (flat structure)
+      const contactData = dynamicFields || {};
+      for (const [key, value] of Object.entries(contactData)) {
+        if (!['_id', 'listId'].includes(key) && value !== undefined && value !== null) {
+          answerUrlParams.append(key, String(value));
+        }
+      }
+
+      // Ensure backward compatibility for standard fields
+      if (!contactData.firstName && firstName) answerUrlParams.set('firstName', firstName);
+      if (!contactData.first_name && firstName) answerUrlParams.set('first_name', firstName);
+      if (!contactData.email && email) answerUrlParams.set('email', email);
+      if (!contactData.tag && tag) answerUrlParams.set('tag', tag);
 
       const answerUrl = `${baseUrl}/ip/xml-plivo?${answerUrlParams.toString()}`;
 

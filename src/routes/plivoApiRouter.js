@@ -169,4 +169,182 @@ router.post('/lead-push', async(req, res) =>{
 
 })
 
+/**
+ * @swagger
+ * /api.markaible/single-call:
+ *   post:
+ *     tags: [Plivo API]
+ *     summary: Initiate a single API call (requires API key)
+ *     description: Make a single call via API for HubSpot or other integrations. Requires assistantId which is used to auto-construct the WebSocket URL. Uses campId='api-call' for tracking.
+ *     security:
+ *       - ApiKeyAuth: []
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - number
+ *               - assistantId
+ *               - fromNumber
+ *             properties:
+ *               number:
+ *                 type: string
+ *                 description: Phone number to call (with country code)
+ *                 example: "+919608848421"
+ *               assistantId:
+ *                 type: string
+ *                 description: Assistant/Bot ID (MongoDB ObjectId from assistant collection). Used to construct WebSocket URL automatically.
+ *                 example: "678782afa8d9072894be7ca9"
+ *               fromNumber:
+ *                 type: string
+ *                 description: Caller ID number
+ *                 example: "+918035735659"
+ *               wssUrl:
+ *                 type: string
+ *                 description: (OBSOLETE - ignored if provided) WebSocket URL is auto-constructed from assistantId. This field is accepted for backward compatibility but not used.
+ *                 example: "wss://socket.glimpass.com/chat/v2/678782afa8d9072894be7ca9"
+ *               firstName:
+ *                 type: string
+ *                 description: Contact first name (optional)
+ *                 example: "John"
+ *               email:
+ *                 type: string
+ *                 description: Contact email (optional)
+ *                 example: "john@example.com"
+ *               tag:
+ *                 type: string
+ *                 description: Custom tag for categorization (optional)
+ *                 example: "hubspot-lead"
+ *               provider:
+ *                 type: string
+ *                 description: Telephony provider (optional, auto-detected if not specified)
+ *                 enum: [plivo, twilio]
+ *                 example: "plivo"
+ *     responses:
+ *       200:
+ *         description: Call initiated successfully
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: true
+ *                 message:
+ *                   type: string
+ *                   example: "Call initiated successfully"
+ *                 callUUID:
+ *                   type: string
+ *                   example: "abc-123-def-456"
+ *                 trackingId:
+ *                   type: string
+ *                   description: Same as callUUID, for HubSpot integration
+ *                   example: "abc-123-def-456"
+ *                 assistantId:
+ *                   type: string
+ *                   description: Assistant ID used for the call
+ *                   example: "678782afa8d9072894be7ca9"
+ *       400:
+ *         description: Bad request - missing required fields (number, assistantId, fromNumber)
+ *       401:
+ *         description: Unauthorized - API key missing
+ *       403:
+ *         description: Forbidden - Invalid API key
+ *       404:
+ *         description: Assistant not found
+ *       500:
+ *         description: Internal server error
+ */
+router.post('/single-call', async(req, res) => {
+  try {
+    const { number, assistantId, wssUrl, fromNumber, firstName, email, tag, provider, includeGlobalContext, includeAgentContext, global_context, Agent_context, ...customFields } = req.body;
+    const clientData = req.clientData; // From API key middleware
+
+    // Validate required fields - assistantId is required
+    if (!number || !fromNumber || !assistantId) {
+      return res.status(400).json({
+        success: false,
+        message: 'Required fields: number, assistantId, fromNumber'
+      });
+    }
+
+    // Verify assistant exists
+    const { getAssistantDetails } = require('./../apps/interLogue/client.js');
+    const assistantData = await getAssistantDetails(assistantId);
+
+    if (!assistantData || assistantData.length === 0) {
+      return res.status(404).json({
+        success: false,
+        message: `Assistant not found with ID: ${assistantId}`
+      });
+    }
+
+    // Always construct wssUrl from assistantId (ignore wssUrl if provided)
+    // Pattern: wss://socket.glimpass.com/chat/v2/{assistantId}
+    const finalWssUrl = `wss://socket.glimpass.com/chat/v2/${assistantId}`;
+
+    // Log if wssUrl was provided but will be ignored
+    if (wssUrl) {
+      console.log(`ℹ️ wssUrl provided but will be ignored, using constructed URL from assistantId`);
+    }
+
+    // Import unified call processing system
+    const { processSingleCall } = require('./../apps/helper/activeCalls.js');
+
+    console.log(`📞 API Call Request - Client: ${clientData.name}, To: ${number}, From: ${fromNumber}, Assistant: ${assistantId}`);
+
+    // Process single call using unified system
+    const callResult = await processSingleCall({
+      clientId: clientData._id.toString(),
+      campaignId: 'api-call', // Special identifier for API-initiated calls
+      from: fromNumber,
+      to: number,
+      wssUrl: finalWssUrl,
+      firstName: firstName || '',
+      email: email || '',
+      tag: tag || assistantId, // Use assistantId as tag for billing if no custom tag provided
+      listId: 'api-call',
+      provider: provider || null, // Optional: 'twilio' or 'plivo', auto-detected if not specified
+      // Enhanced tracking for API calls
+      contactIndex: 0,
+      sequenceNumber: 1,
+      contactData: { number, firstName, email, tag, assistantId, wssUrl: finalWssUrl, ...customFields },
+      dynamicFields: { number, firstName, email, tag, assistantId, wssUrl: finalWssUrl, ...customFields },
+      callSource: 'api-key', // Mark as API key initiated (vs 'jwt' for manual test)
+      // NEW: Context flags for memory system (support both camelCase and snake_case)
+      contextFlags: {
+        includeGlobalContext: includeGlobalContext || global_context || false,
+        includeAgentContext: includeAgentContext || Agent_context || false
+      }
+    });
+
+    if (callResult.success) {
+      console.log(`✅ API Call initiated: ${callResult.callUUID}`);
+      res.status(200).json({
+        success: true,
+        message: 'Call initiated successfully',
+        callUUID: callResult.callUUID,
+        assistantId: assistantId
+      });
+    } else {
+      console.error(`❌ API Call failed: ${callResult.error}`);
+      res.status(500).json({
+        success: false,
+        message: callResult.error || 'Failed to initiate call'
+      });
+    }
+
+  } catch(error) {
+    console.error('❌ API single call error:', error);
+    res.status(500).send({
+      success: false,
+      message: "Internal Server Error",
+      error: error.message
+    });
+  }
+})
+
 module.exports = router;

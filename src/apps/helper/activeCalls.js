@@ -218,10 +218,16 @@ async function trackCallStart(callData) {
       // Enhanced tracking for pause/resume
       contactIndex: callData.contactIndex || null,        // Position in campaign list
       sequenceNumber: callData.sequenceNumber || null,    // Unique sequence in campaign
-      contactData: {                                      // Store contact info for resume
+      // Store FULL contact data including all custom fields
+      contactData: callData.contactData || {
         first_name: callData.firstName || '',
         number: callData.to,
         listId: callData.listId
+      },
+      // NEW: Context flags for memory system
+      contextFlags: callData.contextFlags || {
+        includeGlobalContext: false,
+        includeAgentContext: false
       },
       createdAt: new Date()
     };
@@ -661,7 +667,17 @@ async function processSingleCall(callParams) {
       contactIndex: callParams.contactIndex,
       sequenceNumber: callParams.sequenceNumber,
       firstName: callParams.firstName,
-      listId: callParams.listId
+      listId: callParams.listId,
+      // NEW: Pass full contact data and context flags
+      contactData: callParams.contactData || {
+        first_name: callParams.firstName || '',
+        number: to,
+        listId: callParams.listId
+      },
+      contextFlags: callParams.contextFlags || {
+        includeGlobalContext: false,
+        includeAgentContext: false
+      }
     };
     
     const trackResult = await trackCallStart(callData);

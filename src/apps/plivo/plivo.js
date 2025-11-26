@@ -2693,6 +2693,100 @@ async function getTestCallReport(clientId) {
   }
 }
 
+// Get API call reports (calls initiated via API key) - Enhanced with full data enrichment
+// Similar to test calls but filters campId='api-call' instead of 'testcall'
+async function getApiCallReport(clientId) {
+  try {
+    await connectToMongo();
+    const database = client.db("talkGlimpass");
+    const hangupCollection = database.collection("plivoHangupData");
+    const logCollection = database.collection("logData");
+    const recordCollection = database.collection("plivoRecordData");
+
+    // Fetch all hangup data for API calls (campId = 'api-call') filtered by clientId
+    // Include both Plivo and Twilio API calls for unified reporting
+    // Use aggregation pipeline to convert EndTime string to Date for proper sorting
+    const hangupDataDocs = await hangupCollection.aggregate([
+      {
+        $match: {
+          campId: 'api-call',
+          clientId: clientId
+        }
+      },
+      {
+        $addFields: {
+          // Convert EndTime string to Date for sorting, fallback to createdAt if EndTime missing
+          sortDate: {
+            $cond: {
+              if: { $ne: ["$EndTime", null] },
+              then: { $dateFromString: { dateString: "$EndTime", onError: "$createdAt" } },
+              else: "$createdAt"
+            }
+          }
+        }
+      },
+      {
+        $sort: { sortDate: -1 } // Sort by converted date, latest first
+      },
+      {
+        $unset: "sortDate" // Remove the temporary field from results
+      }
+    ]).toArray();
+
+    if (hangupDataDocs.length === 0) {
+      return { status: 404, message: "No API call data found." };
+    }
+
+    // Extract unique CallUUIDs from hangupData
+    const callUUIDs = hangupDataDocs.map(doc => doc.CallUUID);
+
+    // Fetch all logData documents based on CallUUIDs (contains bot callback data, lead analysis, etc.)
+    const logDataDocs = await logCollection.find({ callUUID: { $in: callUUIDs } }).toArray();
+
+    // Calculate total conversation time from hangup data (more accurate)
+    const totalConversationTime = hangupDataDocs.reduce((sum, doc) => sum + (parseInt(doc.Duration) || 0), 0);
+
+    // Group log data by CallUUID and get the latest entry using ObjectId comparison
+    const latestLogDataMap = new Map();
+    logDataDocs.forEach(doc => {
+      const existingDoc = latestLogDataMap.get(doc.callUUID);
+      if (!existingDoc || doc._id > existingDoc._id) {
+        latestLogDataMap.set(doc.callUUID, doc);
+      }
+    });
+
+    // Fetch corresponding records from plivoRecordData (recording URLs)
+    const recordDataDocs = await recordCollection.find({ CallUUID: { $in: callUUIDs } }).toArray();
+
+    // Convert recordDataDocs to a Map for fast lookup
+    const recordMap = new Map(recordDataDocs.map(record => [record.CallUUID, record.RecordUrl]));
+
+    // Merge logData and record URLs into hangupData (following same pattern as campaign/incoming reports)
+    const mergedData = hangupDataDocs.map(hangupDoc => {
+      const logData = latestLogDataMap.get(hangupDoc.CallUUID) || {};
+      return {
+        ...hangupDoc,
+        ...logData, // Merge latest log data (includes bot callback data, lead analysis, conversation logs)
+        // CRITICAL: Preserve RecordUrl from hangup data (Twilio), fallback to record collection (Plivo)
+        RecordUrl: hangupDoc.RecordUrl || recordMap.get(hangupDoc.CallUUID) || null,
+        callType: 'api-call' // Mark as API call for identification
+      };
+    });
+
+    // Data is already sorted by database aggregation pipeline (EndTime latest to oldest)
+
+    return {
+      status: 200,
+      data: mergedData,
+      totalDuration: totalConversationTime,
+      message: "API call data fetched successfully with enriched information."
+    };
+  } catch (error) {
+    console.error("Error fetching enriched API call report:", error);
+    return { status: 500, message: "Internal server error." };
+  }
+}
+
 // Campaign Analytics - Comprehensive metrics for individual campaigns
 async function getCampaignAnalytics(campaignId) {
   try {
@@ -2992,6 +3086,7 @@ async function getClientAnalytics(clientId, months = 12) {
     getIncomingBilling,
     saveSingleLeadData,
     getTestCallReport,
+    getApiCallReport, // New: API call report function
     // Enhanced campaign management functions
     cancelCampaign,
     pauseCampaign,

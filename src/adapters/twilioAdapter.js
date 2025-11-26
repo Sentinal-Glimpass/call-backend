@@ -54,7 +54,7 @@ class TwilioAdapter {
       
       const campId = campaignId || 'direct';
 
-      // Build query parameters with minimal fields
+      // Build query parameters with dynamic CSV fields
       const queryParams = new URLSearchParams({
         wss: wssUrl,
         clientId: clientId || '',
@@ -62,6 +62,19 @@ class TwilioAdapter {
         campId,
         preUUID: preGeneratedUUID
       });
+
+      // Add ALL dynamic CSV fields as individual query parameters (flat structure)
+      const contactData = dynamicFields || {};
+      for (const [key, value] of Object.entries(contactData)) {
+        if (!['_id', 'listId'].includes(key) && value !== undefined && value !== null) {
+          queryParams.append(key, String(value));
+        }
+      }
+
+      // Ensure backward compatibility for standard fields
+      if (!contactData.firstName && firstName) queryParams.set('firstName', firstName);
+      if (!contactData.first_name && firstName) queryParams.set('first_name', firstName);
+      if (!contactData.tag && tag) queryParams.set('tag', tag);
 
       const queryString = queryParams.toString();
       
