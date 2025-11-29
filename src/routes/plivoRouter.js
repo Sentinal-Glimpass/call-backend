@@ -1947,6 +1947,8 @@ router.post('/hangup-url', async (req, res) => {
           callType = 'incoming';
         } else if (hangupData.campId === 'testcall') {
           callType = 'testcall';
+        } else if (hangupData.campId === 'api-call') {
+          callType = 'api-call'; // API-initiated calls via API key - treated like testcall for billing
         } else {
           callType = 'campaign';
         }
@@ -1992,7 +1994,7 @@ router.post('/hangup-url', async (req, res) => {
               });
             }
         } else {
-          // For test calls and campaigns, tag contains assistantId - need to lookup client
+          // For test calls, api calls, and campaigns, tag contains assistantId - need to lookup client
           const assistantId = hangupData.tag;
           if (!assistantId) {
             console.error('❌ No assistantId found in tag for', callType, 'call');
@@ -2031,27 +2033,36 @@ router.post('/hangup-url', async (req, res) => {
 
         const duration = parseInt(hangupData.Duration) || 0;
         const creditsToDeduct = duration; // 1 second = 1 credit
-        const currentBalance = existingClient.availableBalance || 0;
-        const newBalance = currentBalance - creditsToDeduct;
 
-        console.log(`💰 NEW Billing: ${callType} call - ${creditsToDeduct} credits (duration: ${duration}s)`);
-        console.log(`💰 Current Balance: ${currentBalance}`);
-
-        // UPDATED BILLING LOGIC: Balance updates for ALL calls, but billing history only for non-campaign calls
-        console.log(`💰 Processing call billing: ${currentBalance} -> ${newBalance}`);
-
-        // Update client balance immediately for ALL call types (including campaign calls)
+        // CRITICAL: Connect to MongoDB early for idempotency check
         const { connectToMongo, client: mongoClient } = require('../../models/mongodb.js');
         await connectToMongo();
         const database = mongoClient.db("talkGlimpass");
         const clientCollection = database.collection("client");
         const { ObjectId } = require('mongodb');
 
-        // Update client balance immediately for ALL calls (real-time balance updates)
-        await clientCollection.updateOne(
-          { _id: new ObjectId(clientId) },
-          { $set: { availableBalance: newBalance } }
-        );
+        // CRITICAL IDEMPOTENCY CHECK: Check if this call was already billed BEFORE updating balance
+        // This prevents double-deduction on webhook retries
+        const hangupCollection = database.collection("plivoHangupData");
+        const existingHangup = await hangupCollection.findOne({ CallUUID: hangupData.CallUUID });
+
+        if (existingHangup) {
+          console.log(`⚠️ Call ${hangupData.CallUUID} already processed - skipping balance update to prevent double deduction`);
+          // Skip to end - hangup data already exists, no billing needed
+        } else {
+          // Fresh call - proceed with billing
+          const currentBalance = existingClient.availableBalance || 0;
+          const newBalance = currentBalance - creditsToDeduct;
+
+          console.log(`💰 NEW Billing: ${callType} call - ${creditsToDeduct} credits (duration: ${duration}s)`);
+          console.log(`💰 Current Balance: ${currentBalance}`);
+          console.log(`💰 Processing call billing: ${currentBalance} -> ${newBalance}`);
+
+          // Update client balance immediately for ALL calls (real-time balance updates)
+          await clientCollection.updateOne(
+            { _id: new ObjectId(clientId) },
+            { $set: { availableBalance: newBalance } }
+          );
 
         // Broadcast balance update via SSE for ALL calls (including campaign calls)
         if (billingRouter.broadcastBalanceUpdate) {
@@ -2065,38 +2076,51 @@ router.post('/hangup-url', async (req, res) => {
           console.warn('⚠️ SSE broadcast function not available');
         }
         
-        // BILLING HISTORY: Only for non-campaign calls (incoming, test calls)
+        // BILLING HISTORY: Only for non-campaign calls (incoming, test calls, api calls)
         // Campaign calls get billing history entries only at campaign completion
         if (callType !== 'campaign') {
           const billingHistoryCollection = database.collection("billingHistory");
 
-          let billingDescription, campName;
-          if (callType === 'testcall') {
-            billingDescription = `Test call to ${hangupData.To} for ${duration} seconds`;
-            campName = 'Test Call';
-          } else {
-            billingDescription = `Incoming call from ${hangupData.From} for ${duration} seconds`;
-            campName = 'Incoming Call';
-          }
-
-          const billingEntry = {
-            clientId: clientId,
-            camp_name: campName,
-            campaignId: '',
-            balanceCount: -creditsToDeduct, // Negative for deductions
-            date: new Date(),
-            desc: billingDescription,
-            transactionType: 'Dr', // Debit entry
-            newAvailableBalance: newBalance,
+          // IDEMPOTENCY CHECK: Prevent duplicate billing entries for webhook retries
+          const existingBillingEntry = await billingHistoryCollection.findOne({
             callUUID: hangupData.CallUUID,
-            callDuration: duration,
-            callType: callType,
-            from: hangupData.From,
-            to: hangupData.To
-          };
+            callType: callType
+          });
 
-          const historyResult = await billingHistoryCollection.insertOne(billingEntry);
-          console.log(`✅ billingHistory entry created for ${callType}: ${historyResult.insertedId}`);
+          if (existingBillingEntry) {
+            console.log(`⚠️ Billing entry already exists for ${callType} call ${hangupData.CallUUID} - skipping duplicate`);
+          } else {
+            let billingDescription, campName;
+            if (callType === 'testcall') {
+              billingDescription = `Test call to ${hangupData.To} for ${duration} seconds`;
+              campName = 'Test Call';
+            } else if (callType === 'api-call') {
+              billingDescription = `API call to ${hangupData.To} for ${duration} seconds`;
+              campName = 'API Call';
+            } else {
+              billingDescription = `Incoming call from ${hangupData.From} for ${duration} seconds`;
+              campName = 'Incoming Call';
+            }
+
+            const billingEntry = {
+              clientId: clientId,
+              camp_name: campName,
+              campaignId: '',
+              balanceCount: -creditsToDeduct, // Negative for deductions
+              date: new Date(),
+              desc: billingDescription,
+              transactionType: 'Dr', // Debit entry
+              newAvailableBalance: newBalance,
+              callUUID: hangupData.CallUUID,
+              callDuration: duration,
+              callType: callType,
+              from: hangupData.From,
+              to: hangupData.To
+            };
+
+            const historyResult = await billingHistoryCollection.insertOne(billingEntry);
+            console.log(`✅ billingHistory entry created for ${callType}: ${historyResult.insertedId}`);
+          }
         } else {
           console.log(`📋 Campaign call - balance updated but billing history deferred until campaign completion`);
         }
@@ -2119,7 +2143,8 @@ router.post('/hangup-url', async (req, res) => {
         console.log(`✅ Call processed: ${creditsToDeduct} credits deducted, balance updated to ${newBalance} (Call Type: ${callType})`);
 
         // Note: Campaign calls get real-time balance updates but billing history only at campaign end
-        
+        } // End of else block (fresh call - proceed with billing)
+
       } catch (billingError) {
         console.error(`❌ Billing failed for ${callType} call:`, billingError);
         // Continue to save hangup data even if billing fails

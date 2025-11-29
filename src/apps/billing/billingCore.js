@@ -14,7 +14,7 @@ async function saveCallBillingDetail(callData) {
     await connectToMongo();
     const database = client.db("talkGlimpass");
     const collection = database.collection("callBillingDetails");
-    
+
     const {
       clientId,
       callUuid,
@@ -28,15 +28,27 @@ async function saveCallBillingDetail(callData) {
       aiCredits = 0,
       telephonyCredits = 0
     } = callData;
-    
+
+    // IDEMPOTENCY CHECK: Prevent duplicate call billing details for webhook retries
+    const existingRecord = await collection.findOne({ callUuid: callUuid });
+    if (existingRecord) {
+      console.log(`⚠️ Call billing detail already exists for ${callUuid} - skipping duplicate`);
+      return {
+        success: true,
+        recordId: existingRecord._id.toString(),
+        billingDetail: existingRecord,
+        duplicate: true
+      };
+    }
+
     // Calculate total credits if not provided
     const totalCredits = credits || (aiCredits + telephonyCredits);
-    
+
     const billingDetail = {
       clientId: clientId.toString(),
       callUuid,
       timestamp: new Date(),
-      type, // campaign, incoming, testcall
+      type, // campaign, incoming, testcall, api-call
       duration: parseInt(duration) || 0,
       from,
       to,
@@ -46,9 +58,9 @@ async function saveCallBillingDetail(callData) {
       campaignId: campaignId ? campaignId.toString() : null,
       campaignName: campaignName || null
     };
-    
+
     const result = await collection.insertOne(billingDetail);
-    
+
     console.log(`✅ Call billing detail saved: ${result.insertedId} (${type} - ${totalCredits} credits)`);
     
     return {

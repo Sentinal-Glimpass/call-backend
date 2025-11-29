@@ -439,6 +439,13 @@ async function saveHangupData(hangupData) {
     const database = client.db("talkGlimpass");
     const collection = database.collection("plivoHangupData");
 
+    // IDEMPOTENCY CHECK: Prevent duplicate hangup records for webhook retries
+    const existingRecord = await collection.findOne({ CallUUID: hangupData.CallUUID });
+    if (existingRecord) {
+      console.log(`⚠️ Hangup data already exists for CallUUID ${hangupData.CallUUID} - skipping duplicate`);
+      return { status: 200, message: "Hangup data already exists.", duplicate: true };
+    }
+
     // Insert the new record since no duplicate exists
     await collection.insertOne(hangupData);
     console.log("hangup data saved successfully.")

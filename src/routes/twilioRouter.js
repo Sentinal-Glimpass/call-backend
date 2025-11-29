@@ -174,41 +174,51 @@ router.post('/status-callback', async (req, res) => {
       const campId = callRecord?.campaignId === 'testcall' ? 'testcall' : (callRecord?.campaignId?.toString() || 'incoming');
       
       // Map Twilio data to exact Plivo format for frontend compatibility
+      // Track if this is a retry (call already processed)
+      let isRetry = false;
+
       try {
         const hangupCollection = database.collection("plivoHangupData");
         const { mapTwilioHangupToPlivoFormat } = require('../adapters/twilioToPlivoMapper.js');
-        
-        // Debug: Check if RecordingUrl is in the status callback
-        if (req.body.RecordingUrl) {
-          console.log(`🎬 Recording URL found in status callback: ${req.body.RecordingUrl}`);
-        }
-        
-        console.log(`🔍 DEBUG - Raw Twilio data:`, JSON.stringify({
-          CallSid: req.body.CallSid,
-          RecordingUrl: req.body.RecordingUrl,
-          Duration: req.body.Duration,
-          CallDuration: req.body.CallDuration
-        }, null, 2));
-        
-        // Transform Twilio data to Plivo format
-        const hangupData = mapTwilioHangupToPlivoFormat(req.body, {
-          ...callRecord,
-          tag: callRecord.tag || '',
-          firstName: callRecord.firstName || ''
-        });
-        
-        console.log(`🔍 DEBUG - Mapped hangup data RecordUrl:`, hangupData.RecordUrl);
-        
-        await hangupCollection.insertOne(hangupData);
-        
-        // Fetch and log what was actually saved
-        const savedRecord = await hangupCollection.findOne({ CallUUID: ourCallUUID }, { RecordUrl: 1, Duration: 1, BillDuration: 1 });
-        console.log(`🔍 DEBUG - Saved record:`, JSON.stringify(savedRecord, null, 2));
-        
-        console.log(`✅ Twilio hangup data saved in Plivo format for call ${ourCallUUID} -> Twilio SID ${CallSid}`);
-        console.log(`   Client: ${hangupData.clientId}, Campaign: ${hangupData.campId}, Duration: ${hangupData.Duration}s`);
-        console.log(`   Recording URL: ${hangupData.RecordUrl || 'STILL NULL!'}`);
-        console.log(`   BillDuration: ${hangupData.BillDuration}s`);
+
+        // CRITICAL IDEMPOTENCY CHECK: Check if this call was already processed
+        const existingHangup = await hangupCollection.findOne({ CallUUID: ourCallUUID });
+        if (existingHangup) {
+          console.log(`⚠️ Twilio call ${ourCallUUID} already processed - skipping to prevent double billing`);
+          isRetry = true;
+        } else {
+          // Debug: Check if RecordingUrl is in the status callback
+          if (req.body.RecordingUrl) {
+            console.log(`🎬 Recording URL found in status callback: ${req.body.RecordingUrl}`);
+          }
+
+          console.log(`🔍 DEBUG - Raw Twilio data:`, JSON.stringify({
+            CallSid: req.body.CallSid,
+            RecordingUrl: req.body.RecordingUrl,
+            Duration: req.body.Duration,
+            CallDuration: req.body.CallDuration
+          }, null, 2));
+
+          // Transform Twilio data to Plivo format
+          const hangupData = mapTwilioHangupToPlivoFormat(req.body, {
+            ...callRecord,
+            tag: callRecord.tag || '',
+            firstName: callRecord.firstName || ''
+          });
+
+          console.log(`🔍 DEBUG - Mapped hangup data RecordUrl:`, hangupData.RecordUrl);
+
+          await hangupCollection.insertOne(hangupData);
+
+          // Fetch and log what was actually saved
+          const savedRecord = await hangupCollection.findOne({ CallUUID: ourCallUUID }, { RecordUrl: 1, Duration: 1, BillDuration: 1 });
+          console.log(`🔍 DEBUG - Saved record:`, JSON.stringify(savedRecord, null, 2));
+
+          console.log(`✅ Twilio hangup data saved in Plivo format for call ${ourCallUUID} -> Twilio SID ${CallSid}`);
+          console.log(`   Client: ${hangupData.clientId}, Campaign: ${hangupData.campId}, Duration: ${hangupData.Duration}s`);
+          console.log(`   Recording URL: ${hangupData.RecordUrl || 'STILL NULL!'}`);
+          console.log(`   BillDuration: ${hangupData.BillDuration}s`);
+        } // End of else block (not a retry)
       } catch (hangupError) {
         console.error('❌ Error saving Twilio hangup data:', hangupError);
       }
@@ -227,9 +237,10 @@ router.post('/status-callback', async (req, res) => {
       }
       
       // CRITICAL: Add missing billing operations that Plivo hangup handler does
-      if (callRecord?.clientId) {
+      // Skip billing if this is a retry (call already processed)
+      if (callRecord?.clientId && !isRetry) {
         try {
-          
+
           const { CallDuration } = req.body;
           const billingDuration = parseInt(CallDuration) || parseInt(Duration) || 0;
           console.log(`💰 Processing Twilio billing for call: ${CallSid}, Type: ${campId}, Duration: ${billingDuration}s (CallDuration: ${CallDuration}, Duration: ${Duration})`);
@@ -247,6 +258,8 @@ router.post('/status-callback', async (req, res) => {
             callType = 'incoming';
           } else if (campId === 'testcall') {
             callType = 'testcall';
+          } else if (campId === 'api-call') {
+            callType = 'api-call'; // API-initiated calls via API key - treated like testcall for billing
           } else {
             callType = 'campaign';
           }
@@ -286,37 +299,50 @@ router.post('/status-callback', async (req, res) => {
             }
           }
           
-          // BILLING HISTORY: Only for non-campaign calls
+          // BILLING HISTORY: Only for non-campaign calls (incoming, test calls, api calls)
           if (callType !== 'campaign') {
             const billingHistoryCollection = database.collection("billingHistory");
-            
-            let billingDescription, campName;
-            if (callType === 'testcall') {
-              billingDescription = `Test call to ${To} for ${billingDuration} seconds`;
-              campName = 'Test Call';
-            } else {
-              billingDescription = `Incoming call from ${From} for ${billingDuration} seconds`;
-              campName = 'Incoming Call';
-            }
-            
-            const billingEntry = {
-              clientId: clientId,
-              camp_name: campName,
-              campaignId: '',
-              balanceCount: -creditsToDeduct,
-              date: new Date(),
-              desc: billingDescription,
-              transactionType: 'Dr',
-              newAvailableBalance: newBalance,
+
+            // IDEMPOTENCY CHECK: Prevent duplicate billing entries for webhook retries
+            const existingBillingEntry = await billingHistoryCollection.findOne({
               callUUID: CallSid,
-              callDuration: billingDuration,
-              callType: callType,
-              from: From,
-              to: To
-            };
-            
-            await billingHistoryCollection.insertOne(billingEntry);
-            console.log(`✅ Twilio billingHistory entry created for ${callType}`);
+              callType: callType
+            });
+
+            if (existingBillingEntry) {
+              console.log(`⚠️ Twilio billing entry already exists for ${callType} call ${CallSid} - skipping duplicate`);
+            } else {
+              let billingDescription, campName;
+              if (callType === 'testcall') {
+                billingDescription = `Test call to ${To} for ${billingDuration} seconds`;
+                campName = 'Test Call';
+              } else if (callType === 'api-call') {
+                billingDescription = `API call to ${To} for ${billingDuration} seconds`;
+                campName = 'API Call';
+              } else {
+                billingDescription = `Incoming call from ${From} for ${billingDuration} seconds`;
+                campName = 'Incoming Call';
+              }
+
+              const billingEntry = {
+                clientId: clientId,
+                camp_name: campName,
+                campaignId: '',
+                balanceCount: -creditsToDeduct,
+                date: new Date(),
+                desc: billingDescription,
+                transactionType: 'Dr',
+                newAvailableBalance: newBalance,
+                callUUID: CallSid,
+                callDuration: billingDuration,
+                callType: callType,
+                from: From,
+                to: To
+              };
+
+              await billingHistoryCollection.insertOne(billingEntry);
+              console.log(`✅ Twilio billingHistory entry created for ${callType}`);
+            }
           } else {
             console.log(`📋 Twilio campaign call - balance updated but billing history deferred until campaign completion`);
           }
