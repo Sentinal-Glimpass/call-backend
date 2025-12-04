@@ -3781,4 +3781,362 @@ router.get('/check-scheduled-campaigns', async(req, res) => {
   }
 });
 
+/**
+ * @swagger
+ * /plivo/transfer-call:
+ *   post:
+ *     tags: [Plivo]
+ *     summary: Transfer an active call to another number
+ *     description: Transfer an ongoing call to a different phone number. Supports Plivo and Twilio providers.
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - provider
+ *               - callUuid
+ *               - transferTo
+ *               - callerNumber
+ *             properties:
+ *               provider:
+ *                 type: string
+ *                 enum: [plivo, twilio]
+ *                 description: Telephony provider
+ *                 example: "plivo"
+ *               callUuid:
+ *                 type: string
+ *                 description: Active call UUID to transfer
+ *                 example: "abc-123-def-456"
+ *               transferTo:
+ *                 type: string
+ *                 description: Phone number to transfer the call to
+ *                 example: "+919876543210"
+ *               callerNumber:
+ *                 type: string
+ *                 description: Original caller number (used for credential lookup)
+ *                 example: "+918035735659"
+ *     responses:
+ *       200:
+ *         description: Transfer initiated successfully
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: true
+ *                 message:
+ *                   type: string
+ *                   example: "Call transfer initiated successfully"
+ *                 provider:
+ *                   type: string
+ *                   example: "plivo"
+ *                 callUuid:
+ *                   type: string
+ *                   example: "abc-123-def-456"
+ *                 transferTo:
+ *                   type: string
+ *                   example: "+919876543210"
+ *       400:
+ *         description: Bad request - missing required fields
+ *       500:
+ *         description: Internal server error or transfer failed
+ */
+router.post('/transfer-call', async (req, res) => {
+  try {
+    const { provider, callUuid, transferTo, callerNumber } = req.body;
+
+    // Validate required fields
+    if (!provider || !callUuid || !transferTo || !callerNumber) {
+      return res.status(400).json({
+        success: false,
+        message: 'Required fields: provider, callUuid, transferTo, callerNumber'
+      });
+    }
+
+    // Validate provider
+    const supportedProviders = ['plivo', 'twilio'];
+    if (!supportedProviders.includes(provider.toLowerCase())) {
+      return res.status(400).json({
+        success: false,
+        message: `Unsupported provider: ${provider}. Supported: ${supportedProviders.join(', ')}`
+      });
+    }
+
+    console.log(`📞 Transfer call request - Provider: ${provider}, CallUUID: ${callUuid}, TransferTo: ${transferTo}`);
+
+    // Get credentials using existing pattern
+    const TelephonyCredentialsService = require('../services/telephonyCredentialsService');
+    const PhoneProviderService = require('../services/phoneProviderService');
+
+    let credentials;
+    let credentialSource = 'system-default';
+
+    try {
+      // Try to find client by caller number
+      const { connectToMongo, client: mongoClient } = require('../../models/mongodb.js');
+      await connectToMongo();
+      const database = mongoClient.db("talkGlimpass");
+      const clientCollection = database.collection("client");
+
+      // Generate possible number formats for lookup
+      const possibleNumbers = [callerNumber];
+      if (callerNumber.startsWith('+91')) {
+        possibleNumbers.push(callerNumber.slice(1)); // Without +
+        possibleNumbers.push(callerNumber.slice(3)); // Without +91
+        possibleNumbers.push('0' + callerNumber.slice(3)); // With leading 0
+      } else if (callerNumber.startsWith('91') && callerNumber.length === 12) {
+        possibleNumbers.push('+' + callerNumber);
+        possibleNumbers.push(callerNumber.slice(2));
+        possibleNumbers.push('0' + callerNumber.slice(2));
+      }
+
+      const foundClient = await clientCollection.findOne({
+        $or: [
+          { callerNumbers: { $in: possibleNumbers } },
+          { incomingSet: { $in: possibleNumbers } }
+        ]
+      });
+
+      if (foundClient) {
+        // Try to get client-specific credentials
+        const clientCreds = await TelephonyCredentialsService.getCredentials(
+          foundClient._id.toString(),
+          provider.toLowerCase()
+        );
+        if (clientCreds) {
+          credentials = clientCreds;
+          credentialSource = 'client-specific';
+          console.log(`🔑 Using client-specific ${provider} credentials for client: ${foundClient._id}`);
+        }
+      }
+    } catch (lookupError) {
+      console.warn(`⚠️ Client lookup failed, using system defaults: ${lookupError.message}`);
+    }
+
+    // Fallback to system default credentials
+    if (!credentials) {
+      if (provider.toLowerCase() === 'plivo') {
+        credentials = {
+          accountSid: process.env.PLIVO_ACCOUNT_SID,
+          authToken: process.env.PLIVO_AUTH_TOKEN
+        };
+      } else if (provider.toLowerCase() === 'twilio') {
+        credentials = {
+          accountSid: process.env.TWILIO_ACCOUNT_SID,
+          authToken: process.env.TWILIO_AUTH_TOKEN
+        };
+      }
+      console.log(`🔑 Using system default ${provider} credentials`);
+    }
+
+    if (!credentials || !credentials.accountSid || !credentials.authToken) {
+      return res.status(500).json({
+        success: false,
+        message: `No ${provider} credentials available for transfer`
+      });
+    }
+
+    // Build transfer XML URL
+    const baseUrl = process.env.BASE_URL || 'https://application.glimpass.com';
+    const transferXmlUrl = `${baseUrl}/plivo/transfer-xml/${encodeURIComponent(transferTo)}`;
+
+    console.log(`🔗 Transfer XML URL: ${transferXmlUrl}`);
+
+    // Execute transfer based on provider
+    let transferResponse;
+
+    if (provider.toLowerCase() === 'plivo') {
+      const plivo = require('plivo');
+      const plivoClient = new plivo.Client(credentials.accountSid, credentials.authToken);
+
+      console.log(`📞 Initiating Plivo transfer for call: ${callUuid}`);
+
+      transferResponse = await plivoClient.calls.transfer(
+        callUuid,
+        {
+          legs: 'aleg',
+          alegUrl: transferXmlUrl,
+          alegMethod: 'POST'
+        }
+      );
+
+      console.log(`✅ Plivo transfer response:`, transferResponse);
+
+    } else if (provider.toLowerCase() === 'twilio') {
+      // Twilio implementation
+      const twilio = require('twilio');
+      const twilioClient = twilio(credentials.accountSid, credentials.authToken);
+
+      console.log(`📞 Initiating Twilio transfer for call: ${callUuid}`);
+
+      // For Twilio, we update the call with new TwiML
+      const twimlUrl = `${baseUrl}/plivo/transfer-twiml/${encodeURIComponent(transferTo)}`;
+
+      transferResponse = await twilioClient.calls(callUuid).update({
+        url: twimlUrl,
+        method: 'POST'
+      });
+
+      console.log(`✅ Twilio transfer response:`, transferResponse.sid);
+    }
+
+    res.status(200).json({
+      success: true,
+      message: 'Call transfer initiated successfully',
+      provider: provider.toLowerCase(),
+      callUuid: callUuid,
+      transferTo: transferTo,
+      credentialSource: credentialSource,
+      transferResponse: transferResponse
+    });
+
+  } catch (error) {
+    console.error('❌ Error in transfer-call:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to transfer call',
+      error: error.message
+    });
+  }
+});
+
+/**
+ * @swagger
+ * /plivo/transfer-xml/{transferTo}:
+ *   get:
+ *     tags: [Plivo]
+ *     summary: XML callback for Plivo call transfer
+ *     description: Returns Plivo XML to dial the transfer target number
+ *     parameters:
+ *       - in: path
+ *         name: transferTo
+ *         required: true
+ *         schema:
+ *           type: string
+ *         description: Phone number to transfer to (URL encoded)
+ *     responses:
+ *       200:
+ *         description: Plivo XML response
+ *         content:
+ *           application/xml:
+ *             schema:
+ *               type: string
+ *   post:
+ *     tags: [Plivo]
+ *     summary: XML callback for Plivo call transfer (POST)
+ *     description: Returns Plivo XML to dial the transfer target number
+ *     parameters:
+ *       - in: path
+ *         name: transferTo
+ *         required: true
+ *         schema:
+ *           type: string
+ *         description: Phone number to transfer to (URL encoded)
+ *     responses:
+ *       200:
+ *         description: Plivo XML response
+ *         content:
+ *           application/xml:
+ *             schema:
+ *               type: string
+ */
+router.get('/transfer-xml/:transferTo', async (req, res) => {
+  try {
+    const transferTo = decodeURIComponent(req.params.transferTo);
+
+    console.log(`📞 Transfer XML requested for: ${transferTo}`);
+
+    const xmlResponse = `<?xml version="1.0" encoding="UTF-8"?>
+<Response>
+    <Dial dialMusic="real">
+        <Number>${transferTo}</Number>
+    </Dial>
+</Response>`;
+
+    console.log(`📄 Returning Plivo XML:`, xmlResponse);
+
+    res.set('Content-Type', 'application/xml');
+    res.status(200).send(xmlResponse);
+
+  } catch (error) {
+    console.error('❌ Error in transfer-xml:', error);
+    res.status(500).send('Error generating transfer XML');
+  }
+});
+
+router.post('/transfer-xml/:transferTo', async (req, res) => {
+  try {
+    const transferTo = decodeURIComponent(req.params.transferTo);
+
+    console.log(`📞 Transfer XML (POST) requested for: ${transferTo}`);
+    console.log(`📋 Request body:`, req.body);
+
+    const xmlResponse = `<?xml version="1.0" encoding="UTF-8"?>
+<Response>
+    <Dial dialMusic="real">
+        <Number>${transferTo}</Number>
+    </Dial>
+</Response>`;
+
+    console.log(`📄 Returning Plivo XML:`, xmlResponse);
+
+    res.set('Content-Type', 'application/xml');
+    res.status(200).send(xmlResponse);
+
+  } catch (error) {
+    console.error('❌ Error in transfer-xml POST:', error);
+    res.status(500).send('Error generating transfer XML');
+  }
+});
+
+/**
+ * @swagger
+ * /plivo/transfer-twiml/{transferTo}:
+ *   post:
+ *     tags: [Plivo]
+ *     summary: TwiML callback for Twilio call transfer
+ *     description: Returns TwiML to dial the transfer target number
+ *     parameters:
+ *       - in: path
+ *         name: transferTo
+ *         required: true
+ *         schema:
+ *           type: string
+ *         description: Phone number to transfer to (URL encoded)
+ *     responses:
+ *       200:
+ *         description: TwiML response
+ *         content:
+ *           application/xml:
+ *             schema:
+ *               type: string
+ */
+router.post('/transfer-twiml/:transferTo', async (req, res) => {
+  try {
+    const transferTo = decodeURIComponent(req.params.transferTo);
+
+    console.log(`📞 Transfer TwiML requested for: ${transferTo}`);
+
+    const twimlResponse = `<?xml version="1.0" encoding="UTF-8"?>
+<Response>
+    <Dial>
+        <Number>${transferTo}</Number>
+    </Dial>
+</Response>`;
+
+    console.log(`📄 Returning TwiML:`, twimlResponse);
+
+    res.set('Content-Type', 'application/xml');
+    res.status(200).send(twimlResponse);
+
+  } catch (error) {
+    console.error('❌ Error in transfer-twiml:', error);
+    res.status(500).send('Error generating transfer TwiML');
+  }
+});
+
 module.exports = router;
