@@ -3950,40 +3950,39 @@ router.post('/transfer-call', async (req, res) => {
     let transferResponse;
 
     if (provider.toLowerCase() === 'plivo') {
-      const plivo = require('plivo');
-      const plivoClient = new plivo.Client(credentials.accountSid, credentials.authToken);
+      const axios = require('axios');
 
-      // Check if call is still active before attempting transfer
-      try {
-        const callDetails = await plivoClient.calls.get(callUuid);
-        console.log(`📞 Call status check for ${callUuid}: ${callDetails.callStatus}`);
+      // Direct API call matching Python SDK exactly
+      const apiUrl = `https://api.plivo.com/v1/Account/${credentials.accountSid}/Call/${callUuid}/`;
 
-        // Check if call is in a transferable state
-        const transferableStates = ['in-progress', 'ringing'];
-        if (!transferableStates.includes(callDetails.callStatus)) {
-          console.log(`⚠️ Call ${callUuid} is not in transferable state: ${callDetails.callStatus}`);
-          return res.status(400).json({
-            success: false,
-            message: `Call cannot be transferred - current status: ${callDetails.callStatus}`,
-            callStatus: callDetails.callStatus,
-            callUuid: callUuid
-          });
-        }
-      } catch (statusError) {
-        console.warn(`⚠️ Could not verify call status: ${statusError.message}. Proceeding with transfer attempt.`);
-      }
+      console.log(`📞 ====== PLIVO TRANSFER DEBUG ======`);
+      console.log(`📞 Call UUID: ${callUuid}`);
+      console.log(`📞 Auth ID: ${credentials.accountSid}`);
+      console.log(`📞 aleg_url: ${transferXmlUrl}`);
+      console.log(`📞 API URL: ${apiUrl}`);
 
-      console.log(`📞 Initiating Plivo transfer for call: ${callUuid}`);
-
-      transferResponse = await plivoClient.calls.transfer(
-        callUuid,
+      transferResponse = await axios.post(
+        apiUrl,
         {
           legs: 'aleg',
           aleg_url: transferXmlUrl
+        },
+        {
+          auth: {
+            username: credentials.accountSid,
+            password: credentials.authToken
+          },
+          headers: {
+            'Content-Type': 'application/json'
+          }
         }
       );
 
-      console.log(`✅ Plivo transfer response:`, transferResponse);
+      console.log(`✅ Plivo transfer response status: ${transferResponse.status}`);
+      console.log(`✅ Plivo transfer response data:`, JSON.stringify(transferResponse.data, null, 2));
+      console.log(`📞 ====== END PLIVO TRANSFER DEBUG ======`);
+
+      transferResponse = transferResponse.data;
 
     } else if (provider.toLowerCase() === 'twilio') {
       // Twilio implementation
@@ -4065,8 +4064,12 @@ router.post('/transfer-call', async (req, res) => {
  */
 router.get('/transfer-xml/:transferTo', async (req, res) => {
   try {
-    const transferTo = decodeURIComponent(req.params.transferTo);
+    console.log(`🎯 ====== TRANSFER XML GET ENDPOINT HIT ======`);
+    console.log(`🎯 Full URL: ${req.protocol}://${req.get('host')}${req.originalUrl}`);
+    console.log(`🎯 Headers:`, JSON.stringify(req.headers, null, 2));
+    console.log(`🎯 Query params:`, req.query);
 
+    const transferTo = decodeURIComponent(req.params.transferTo);
     console.log(`📞 Transfer XML requested for: ${transferTo}`);
 
     const xmlResponse = `<?xml version="1.0" encoding="UTF-8"?>
@@ -4089,10 +4092,13 @@ router.get('/transfer-xml/:transferTo', async (req, res) => {
 
 router.post('/transfer-xml/:transferTo', async (req, res) => {
   try {
-    const transferTo = decodeURIComponent(req.params.transferTo);
+    console.log(`🎯 ====== TRANSFER XML POST ENDPOINT HIT ======`);
+    console.log(`🎯 Full URL: ${req.protocol}://${req.get('host')}${req.originalUrl}`);
+    console.log(`🎯 Headers:`, JSON.stringify(req.headers, null, 2));
+    console.log(`🎯 Body:`, JSON.stringify(req.body, null, 2));
 
+    const transferTo = decodeURIComponent(req.params.transferTo);
     console.log(`📞 Transfer XML (POST) requested for: ${transferTo}`);
-    console.log(`📋 Request body:`, req.body);
 
     const xmlResponse = `<?xml version="1.0" encoding="UTF-8"?>
 <Response>
