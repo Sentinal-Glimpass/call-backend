@@ -3953,14 +3953,33 @@ router.post('/transfer-call', async (req, res) => {
       const plivo = require('plivo');
       const plivoClient = new plivo.Client(credentials.accountSid, credentials.authToken);
 
+      // Check if call is still active before attempting transfer
+      try {
+        const callDetails = await plivoClient.calls.get(callUuid);
+        console.log(`📞 Call status check for ${callUuid}: ${callDetails.callStatus}`);
+
+        // Check if call is in a transferable state
+        const transferableStates = ['in-progress', 'ringing'];
+        if (!transferableStates.includes(callDetails.callStatus)) {
+          console.log(`⚠️ Call ${callUuid} is not in transferable state: ${callDetails.callStatus}`);
+          return res.status(400).json({
+            success: false,
+            message: `Call cannot be transferred - current status: ${callDetails.callStatus}`,
+            callStatus: callDetails.callStatus,
+            callUuid: callUuid
+          });
+        }
+      } catch (statusError) {
+        console.warn(`⚠️ Could not verify call status: ${statusError.message}. Proceeding with transfer attempt.`);
+      }
+
       console.log(`📞 Initiating Plivo transfer for call: ${callUuid}`);
 
       transferResponse = await plivoClient.calls.transfer(
         callUuid,
         {
           legs: 'aleg',
-          alegUrl: transferXmlUrl,
-          alegMethod: 'POST'
+          aleg_url: transferXmlUrl
         }
       );
 
