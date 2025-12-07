@@ -3847,7 +3847,7 @@ router.get('/check-scheduled-campaigns', async(req, res) => {
  */
 router.post('/transfer-call', async (req, res) => {
   try {
-    const { provider, callUuid, transferTo, callerNumber } = req.body;
+    const { provider, callUuid, transferTo, callerNumber, direction } = req.body;
 
     // Validate required fields
     if (!provider || !callUuid || !transferTo || !callerNumber) {
@@ -3856,6 +3856,14 @@ router.post('/transfer-call', async (req, res) => {
         message: 'Required fields: provider, callUuid, transferTo, callerNumber'
       });
     }
+
+    // Determine leg based on direction: inbound = aleg, outbound = bleg
+    // Default to bleg (outbound) if not specified
+    const callDirection = direction?.toLowerCase() || 'outbound';
+    const leg = callDirection === 'inbound' ? 'aleg' : 'bleg';
+    const legUrl = callDirection === 'inbound' ? 'aleg_url' : 'bleg_url';
+
+    console.log(`📞 Call direction: ${callDirection}, using leg: ${leg}`);
 
     // Validate provider
     const supportedProviders = ['plivo', 'twilio'];
@@ -3955,18 +3963,24 @@ router.post('/transfer-call', async (req, res) => {
       // Direct API call matching Python SDK exactly
       const apiUrl = `https://api.plivo.com/v1/Account/${credentials.accountSid}/Call/${callUuid}/`;
 
+      // Build request body with dynamic leg based on direction
+      const requestBody = {
+        legs: leg,
+        [legUrl]: transferXmlUrl
+      };
+
       console.log(`📞 ====== PLIVO TRANSFER DEBUG ======`);
       console.log(`📞 Call UUID: ${callUuid}`);
       console.log(`📞 Auth ID: ${credentials.accountSid}`);
-      console.log(`📞 bleg_url: ${transferXmlUrl}`);
+      console.log(`📞 Direction: ${callDirection}`);
+      console.log(`📞 Leg: ${leg}`);
+      console.log(`📞 ${legUrl}: ${transferXmlUrl}`);
       console.log(`📞 API URL: ${apiUrl}`);
+      console.log(`📞 Request body:`, JSON.stringify(requestBody, null, 2));
 
       transferResponse = await axios.post(
         apiUrl,
-        {
-          legs: 'bleg',
-          bleg_url: transferXmlUrl
-        },
+        requestBody,
         {
           auth: {
             username: credentials.accountSid,
@@ -4008,6 +4022,8 @@ router.post('/transfer-call', async (req, res) => {
       provider: provider.toLowerCase(),
       callUuid: callUuid,
       transferTo: transferTo,
+      direction: callDirection,
+      leg: leg,
       credentialSource: credentialSource,
       transferResponse: transferResponse
     });
