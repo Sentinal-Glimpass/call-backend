@@ -3955,32 +3955,34 @@ router.post('/transfer-call', async (req, res) => {
     if (provider.toLowerCase() === 'plivo') {
       const axios = require('axios');
 
-      // Direct API call matching Python SDK exactly
-      const apiUrl = `https://api.plivo.com/v1/Account/${credentials.accountSid}/Call/${callUuid}/`;
-
-      // Use 'both' legs for reliable transfer
-      const requestBody = {
-        legs: 'both',
-        aleg_url: transferXmlUrl,
-        bleg_url: transferXmlUrl
+      const baseApiUrl = `https://api.plivo.com/v1/Account/${credentials.accountSid}/Call/${callUuid}`;
+      const authConfig = {
+        auth: {
+          username: credentials.accountSid,
+          password: credentials.authToken
+        }
       };
 
       console.log(`📞 ====== PLIVO TRANSFER DEBUG ======`);
       console.log(`📞 Call UUID: ${callUuid}`);
       console.log(`📞 Auth ID: ${credentials.accountSid}`);
-      console.log(`📞 Legs: both`);
       console.log(`📞 aleg_url: ${transferXmlUrl}`);
-      console.log(`📞 bleg_url: ${transferXmlUrl}`);
-      console.log(`📞 API URL: ${apiUrl}`);
 
+      // For WebSocket streaming calls (AI voice agents):
+      // 1. Call transfer API first - this queues the transfer
+      // 2. Then stop the stream - this releases the call for transfer to execute
+      // Order matters! Stop stream first = call ends. Transfer first, then stop stream = transfer works.
+
+      // Step 1: Call transfer API
+      console.log(`📞 Step 1: Initiating transfer...`);
       transferResponse = await axios.post(
-        apiUrl,
-        requestBody,
+        `${baseApiUrl}/`,
         {
-          auth: {
-            username: credentials.accountSid,
-            password: credentials.authToken
-          },
+          legs: 'aleg',
+          aleg_url: transferXmlUrl
+        },
+        {
+          ...authConfig,
           headers: {
             'Content-Type': 'application/json'
           }
@@ -3989,6 +3991,17 @@ router.post('/transfer-call', async (req, res) => {
 
       console.log(`✅ Plivo transfer response status: ${transferResponse.status}`);
       console.log(`✅ Plivo transfer response data:`, JSON.stringify(transferResponse.data, null, 2));
+
+      // Step 2: Stop the WebSocket stream (releases call for transfer to execute)
+      try {
+        console.log(`📞 Step 2: Stopping WebSocket stream to release call...`);
+        await axios.delete(`${baseApiUrl}/Stream/`, authConfig);
+        console.log(`✅ Stream stopped - transfer executing`);
+      } catch (streamError) {
+        // Stream might not exist or already stopped - continue anyway
+        console.log(`⚠️ Stream stop response: ${streamError.response?.data?.error || streamError.message}`);
+      }
+
       console.log(`📞 ====== END PLIVO TRANSFER DEBUG ======`);
 
       transferResponse = transferResponse.data;
@@ -4017,7 +4030,7 @@ router.post('/transfer-call', async (req, res) => {
       provider: provider.toLowerCase(),
       callUuid: callUuid,
       transferTo: transferTo,
-      legs: 'both',
+      legs: 'aleg',
       credentialSource: credentialSource,
       transferResponse: transferResponse
     });
