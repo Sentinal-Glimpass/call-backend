@@ -3958,14 +3958,14 @@ router.post('/transfer-call', async (req, res) => {
       console.log(`📞 ====== PLIVO TRANSFER DEBUG ======`);
       console.log(`📞 Call UUID: ${callUuid}`);
       console.log(`📞 Auth ID: ${credentials.accountSid}`);
-      console.log(`📞 aleg_url: ${transferXmlUrl}`);
+      console.log(`📞 bleg_url: ${transferXmlUrl}`);
       console.log(`📞 API URL: ${apiUrl}`);
 
       transferResponse = await axios.post(
         apiUrl,
         {
-          legs: 'aleg',
-          aleg_url: transferXmlUrl
+          legs: 'bleg',
+          bleg_url: transferXmlUrl
         },
         {
           auth: {
