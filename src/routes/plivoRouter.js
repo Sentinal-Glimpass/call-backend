@@ -2026,8 +2026,8 @@ router.post('/hangup-url', async (req, res) => {
           }
         }
 
-        // Add resolved clientId to hangupData
-        hangupData.clientId = clientId;
+        // Add resolved clientId to hangupData (ensure string type for consistent querying)
+        hangupData.clientId = clientId?.toString ? clientId.toString() : String(clientId);
 
         console.log(`🎯 Using clientId: ${clientId} for ${callType} call`);
 
@@ -2154,7 +2154,7 @@ router.post('/hangup-url', async (req, res) => {
       // CRITICAL: Always save hangup data regardless of billing success/failure
       try {
         await saveHangupData(hangupData);
-        console.log(`✅ Hangup data saved successfully for CallUUID: ${CallUUID}`);
+        console.log(`✅ Hangup data saved successfully for CallUUID: ${CallUUID}, campId: ${hangupData.campId}, clientId: ${hangupData.clientId}`);
       } catch (hangupError) {
         console.error(`❌ CRITICAL: Failed to save hangup data for ${CallUUID}:`, hangupError);
         // This should be treated as a critical error but still return 200 to Plivo

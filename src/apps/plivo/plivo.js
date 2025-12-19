@@ -2615,14 +2615,19 @@ async function getTestCallReport(clientId) {
     const logCollection = database.collection("logData");
     const recordCollection = database.collection("plivoRecordData");
 
+    // Ensure clientId is a string for consistent matching
+    const clientIdStr = clientId?.toString ? clientId.toString() : String(clientId);
+
+    console.log(`📊 Fetching test call report for clientId: ${clientIdStr}`);
+
     // Fetch all hangup data for test calls (campId = 'testcall') filtered by clientId
     // Include both Plivo and Twilio test calls for unified reporting
     // Use aggregation pipeline to convert EndTime string to Date for proper sorting
     const hangupDataDocs = await hangupCollection.aggregate([
       {
-        $match: { 
+        $match: {
           campId: 'testcall',
-          clientId: clientId
+          clientId: clientIdStr
           // No provider filter - include both Plivo and Twilio calls
         }
       },
@@ -2647,8 +2652,11 @@ async function getTestCallReport(clientId) {
     ]).toArray();
 
     if (hangupDataDocs.length === 0) {
+      console.log(`📊 No test call data found for clientId: ${clientIdStr}`);
       return { status: 404, message: "No test call data found." };
     }
+
+    console.log(`📊 Found ${hangupDataDocs.length} test calls for clientId: ${clientIdStr}`);
 
     // Extract unique CallUUIDs from hangupData
     const callUUIDs = hangupDataDocs.map(doc => doc.CallUUID);
@@ -2710,6 +2718,11 @@ async function getApiCallReport(clientId) {
     const logCollection = database.collection("logData");
     const recordCollection = database.collection("plivoRecordData");
 
+    // Ensure clientId is a string for consistent matching
+    const clientIdStr = clientId?.toString ? clientId.toString() : String(clientId);
+
+    console.log(`📊 Fetching API call report for clientId: ${clientIdStr}`);
+
     // Fetch all hangup data for API calls (campId = 'api-call') filtered by clientId
     // Include both Plivo and Twilio API calls for unified reporting
     // Use aggregation pipeline to convert EndTime string to Date for proper sorting
@@ -2717,7 +2730,7 @@ async function getApiCallReport(clientId) {
       {
         $match: {
           campId: 'api-call',
-          clientId: clientId
+          clientId: clientIdStr
         }
       },
       {
@@ -2741,8 +2754,11 @@ async function getApiCallReport(clientId) {
     ]).toArray();
 
     if (hangupDataDocs.length === 0) {
+      console.log(`📊 No API call data found for clientId: ${clientIdStr}`);
       return { status: 404, message: "No API call data found." };
     }
+
+    console.log(`📊 Found ${hangupDataDocs.length} API calls for clientId: ${clientIdStr}`);
 
     // Extract unique CallUUIDs from hangupData
     const callUUIDs = hangupDataDocs.map(doc => doc.CallUUID);
