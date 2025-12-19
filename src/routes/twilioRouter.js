@@ -178,47 +178,42 @@ router.post('/status-callback', async (req, res) => {
       let isRetry = false;
 
       try {
-        const hangupCollection = database.collection("plivoHangupData");
-        const { mapTwilioHangupToPlivoFormat } = require('../adapters/twilioToPlivoMapper.js');
+        const { saveHangupData } = require('../apps/plivo/plivo.js');
 
-        // CRITICAL IDEMPOTENCY CHECK: Check if this call was already processed
-        const existingHangup = await hangupCollection.findOne({ CallUUID: ourCallUUID });
-        if (existingHangup) {
+        // Prepare Twilio hangup data with metadata for normalization
+        const hangupData = {
+          ...req.body,
+          // Override CallUUID with our internal UUID
+          CallUUID: ourCallUUID,
+          // Add metadata for normalization
+          clientId: callRecord.clientId,
+          campId: callRecord.campaignId === 'testcall' ? 'testcall' : (callRecord.campaignId || 'incoming'),
+          tag: callRecord.tag || '',
+          firstName: callRecord.firstName || '',
+          // Map Twilio fields to expected format
+          Duration: req.body.CallDuration || req.body.Duration || '0',
+          CallStatus: req.body.CallStatus || 'completed',
+          RecordUrl: req.body.RecordingUrl || null
+        };
+
+        // Debug log
+        if (req.body.RecordingUrl) {
+          console.log(`🎬 Recording URL found in status callback: ${req.body.RecordingUrl}`);
+        }
+
+        // Use saveHangupData with Twilio provider - it handles normalization and idempotency
+        const saveResult = await saveHangupData(hangupData, {
+          provider: 'twilio',
+          normalize: true
+        });
+
+        if (saveResult.duplicate) {
           console.log(`⚠️ Twilio call ${ourCallUUID} already processed - skipping to prevent double billing`);
           isRetry = true;
         } else {
-          // Debug: Check if RecordingUrl is in the status callback
-          if (req.body.RecordingUrl) {
-            console.log(`🎬 Recording URL found in status callback: ${req.body.RecordingUrl}`);
-          }
-
-          console.log(`🔍 DEBUG - Raw Twilio data:`, JSON.stringify({
-            CallSid: req.body.CallSid,
-            RecordingUrl: req.body.RecordingUrl,
-            Duration: req.body.Duration,
-            CallDuration: req.body.CallDuration
-          }, null, 2));
-
-          // Transform Twilio data to Plivo format
-          const hangupData = mapTwilioHangupToPlivoFormat(req.body, {
-            ...callRecord,
-            tag: callRecord.tag || '',
-            firstName: callRecord.firstName || ''
-          });
-
-          console.log(`🔍 DEBUG - Mapped hangup data RecordUrl:`, hangupData.RecordUrl);
-
-          await hangupCollection.insertOne(hangupData);
-
-          // Fetch and log what was actually saved
-          const savedRecord = await hangupCollection.findOne({ CallUUID: ourCallUUID }, { RecordUrl: 1, Duration: 1, BillDuration: 1 });
-          console.log(`🔍 DEBUG - Saved record:`, JSON.stringify(savedRecord, null, 2));
-
-          console.log(`✅ Twilio hangup data saved in Plivo format for call ${ourCallUUID} -> Twilio SID ${CallSid}`);
-          console.log(`   Client: ${hangupData.clientId}, Campaign: ${hangupData.campId}, Duration: ${hangupData.Duration}s`);
-          console.log(`   Recording URL: ${hangupData.RecordUrl || 'STILL NULL!'}`);
-          console.log(`   BillDuration: ${hangupData.BillDuration}s`);
-        } // End of else block (not a retry)
+          console.log(`✅ Twilio hangup data saved (normalized) for call ${ourCallUUID} -> Twilio SID ${CallSid}`);
+          console.log(`   Client: ${callRecord.clientId}, Campaign: ${hangupData.campId}, Duration: ${hangupData.Duration}s`);
+        }
       } catch (hangupError) {
         console.error('❌ Error saving Twilio hangup data:', hangupError);
       }

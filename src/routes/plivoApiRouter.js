@@ -26,6 +26,7 @@ const safeFileDelete = (filePath) => {
 
 const {deleteList,insertList, insertListContent,updateList, saveSingleLeadData   } = require('./../apps/plivo/plivo.js')
 const apiKeyValidator = require('./../middleware/apiKeyValidator')
+const { connectToMongo, client } = require('../../models/mongodb.js')
 // Route to upload CSV
 router.post('/upload-csv', upload.single('file'), async (req, res) => {
   const filePath = req.file.path;
@@ -350,6 +351,180 @@ router.post('/single-call', apiKeyValidator, async(req, res) => {
   } catch(error) {
     console.error('❌ API single call error:', error);
     res.status(500).send({
+      success: false,
+      message: "Internal Server Error",
+      error: error.message
+    });
+  }
+})
+
+/**
+ * @swagger
+ * /api/call/{callUUID}:
+ *   get:
+ *     tags: [Plivo API]
+ *     summary: Get call details by callUUID (requires API key)
+ *     description: Fetch detailed information about a specific call. Only returns calls that belong to the authenticated client. Optional fields (transcript, leadAnalysis, etc.) are included only when available.
+ *     security:
+ *       - ApiKeyAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: callUUID
+ *         required: true
+ *         schema:
+ *           type: string
+ *         description: The unique identifier of the call (returned when call was initiated)
+ *         example: "df402ea2-2f39-463e-a283-99eeb257e56a"
+ *     responses:
+ *       200:
+ *         description: Call details retrieved successfully
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: true
+ *                 data:
+ *                   type: object
+ *                   required:
+ *                     - callUUID
+ *                     - to
+ *                     - from
+ *                     - duration
+ *                     - status
+ *                   properties:
+ *                     callUUID:
+ *                       type: string
+ *                       description: Unique call identifier
+ *                     to:
+ *                       type: string
+ *                       description: Called phone number
+ *                     from:
+ *                       type: string
+ *                       description: Caller phone number
+ *                     duration:
+ *                       type: integer
+ *                       description: Call duration in seconds
+ *                     status:
+ *                       type: string
+ *                       description: Final call status (completed, busy, no-answer, failed)
+ *                     hangupCause:
+ *                       type: string
+ *                       description: Reason for call end
+ *                     startTime:
+ *                       type: string
+ *                       description: Call start timestamp
+ *                     endTime:
+ *                       type: string
+ *                       description: Call end timestamp
+ *                     answerTime:
+ *                       type: string
+ *                       description: When call was answered (if answered)
+ *                     recordingUrl:
+ *                       type: string
+ *                       description: URL to call recording (only if recording available)
+ *                     transcript:
+ *                       type: array
+ *                       description: Call transcript (only if available)
+ *                     leadAnalysis:
+ *                       type: object
+ *                       description: AI lead analysis (only if available)
+ *                     callSummary:
+ *                       type: string
+ *                       description: AI-generated call summary (only if available)
+ *                     firstName:
+ *                       type: string
+ *                       description: Contact first name (only if provided)
+ *                     email:
+ *                       type: string
+ *                       description: Contact email (only if provided)
+ *                     tag:
+ *                       type: string
+ *                       description: Custom tag (only if provided)
+ *                     assistantId:
+ *                       type: string
+ *                       description: Assistant ID used for the call
+ *       401:
+ *         description: Unauthorized - API key missing
+ *       403:
+ *         description: Forbidden - Invalid API key or call does not belong to client
+ *       404:
+ *         description: Call not found
+ *       500:
+ *         description: Internal server error
+ */
+router.get('/call/:callUUID', apiKeyValidator, async(req, res) => {
+  try {
+    const { callUUID } = req.params;
+    const clientData = req.clientData;
+    const { createApiResponse } = require('../apps/helper/callDataNormalizer.js');
+
+    if (!callUUID) {
+      return res.status(400).json({
+        success: false,
+        message: 'callUUID parameter is required'
+      });
+    }
+
+    const clientIdStr = clientData._id.toString();
+    console.log(`📞 API Call Fetch - Client: ${clientData.name}, CallUUID: ${callUUID}`);
+
+    await connectToMongo();
+    const database = client.db("talkGlimpass");
+    const hangupCollection = database.collection("plivoHangupData");
+    const logCollection = database.collection("logData");
+    const recordCollection = database.collection("plivoRecordData");
+
+    // Fetch the hangup data for this CallUUID (check both old and new field names)
+    const hangupDoc = await hangupCollection.findOne({
+      $or: [{ CallUUID: callUUID }, { callUUID: callUUID }]
+    });
+
+    if (!hangupDoc) {
+      console.log(`📞 Call not found: ${callUUID}`);
+      return res.status(404).json({
+        success: false,
+        message: 'Call not found'
+      });
+    }
+
+    // Verify the call belongs to the requesting client
+    const docClientId = hangupDoc.clientId?.toString ? hangupDoc.clientId.toString() : String(hangupDoc.clientId || '');
+    if (docClientId !== clientIdStr) {
+      console.log(`⚠️ Unauthorized call access attempt - Client: ${clientData.name} (${clientIdStr}) tried to access call: ${callUUID} belonging to client: ${docClientId}`);
+      return res.status(403).json({
+        success: false,
+        message: 'You do not have permission to access this call'
+      });
+    }
+
+    // Fetch the latest log data for this call (contains transcript, lead analysis, etc.)
+    const logDataDocs = await logCollection.find({ callUUID: callUUID }).sort({ _id: -1 }).limit(1).toArray();
+    const logData = logDataDocs.length > 0 ? logDataDocs[0] : {};
+
+    // Fetch recording URL from plivoRecordData (for Plivo calls that store separately)
+    const recordDoc = await recordCollection.findOne({ CallUUID: callUUID });
+
+    // Merge recording URL into hangupDoc if not already present
+    if (recordDoc?.RecordUrl && !hangupDoc.recordingUrl && !hangupDoc.RecordUrl) {
+      hangupDoc.recordingUrl = recordDoc.RecordUrl;
+    }
+
+    // Use createApiResponse to handle both old and new data formats
+    const mergedData = createApiResponse(hangupDoc, logData);
+
+    console.log(`✅ Call data fetched successfully: ${callUUID}`);
+
+    res.status(200).json({
+      success: true,
+      data: mergedData
+    });
+
+  } catch(error) {
+    console.error('❌ API call fetch error:', error);
+    res.status(500).json({
       success: false,
       message: "Internal Server Error",
       error: error.message

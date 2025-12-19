@@ -432,26 +432,66 @@ async function saveRecordData(recordData) {
   }
 }
 
-async function saveHangupData(hangupData) {
+async function saveHangupData(hangupData, options = {}) {
+  const { normalize = true, provider = 'plivo', metadata = {} } = options;
+
   try {
-    await connectToMongo(); // Ensure MongoDB connection
+    await connectToMongo();
 
     const database = client.db("talkGlimpass");
     const collection = database.collection("plivoHangupData");
 
+    // Get callUUID from either format
+    const callUUID = hangupData.CallUUID || hangupData.callUUID;
+
     // IDEMPOTENCY CHECK: Prevent duplicate hangup records for webhook retries
-    const existingRecord = await collection.findOne({ CallUUID: hangupData.CallUUID });
+    const existingRecord = await collection.findOne({
+      $or: [{ CallUUID: callUUID }, { callUUID: callUUID }]
+    });
+
     if (existingRecord) {
-      console.log(`⚠️ Hangup data already exists for CallUUID ${hangupData.CallUUID} - skipping duplicate`);
+      console.log(`⚠️ Hangup data already exists for CallUUID ${callUUID} - skipping duplicate`);
       return { status: 200, message: "Hangup data already exists.", duplicate: true };
     }
 
-    // Insert the new record since no duplicate exists
-    await collection.insertOne(hangupData);
-    console.log("hangup data saved successfully.")
-    return { status: 201, message: "hangup data saved successfully." }; // Created status
+    // Normalize data if requested (new behavior)
+    let dataToSave;
+    if (normalize) {
+      const { normalizePlivoHangup, normalizeTwilioHangup } = require('../helper/callDataNormalizer.js');
+
+      // Build metadata from hangupData fields that were added by the handler
+      const fullMetadata = {
+        clientId: hangupData.clientId,
+        campId: hangupData.campId,
+        tag: hangupData.tag,
+        assistantId: hangupData.assistantId || hangupData.tag,
+        firstName: hangupData.hangupFirstName || hangupData.firstName,
+        email: hangupData.email,
+        customTag: hangupData.customTag,
+        ...metadata
+      };
+
+      if (provider === 'twilio') {
+        dataToSave = normalizeTwilioHangup(hangupData, fullMetadata);
+      } else {
+        dataToSave = normalizePlivoHangup(hangupData, fullMetadata);
+      }
+
+      // Preserve recording URL if it was added separately
+      if (hangupData.RecordUrl && !dataToSave.recordingUrl) {
+        dataToSave.recordingUrl = hangupData.RecordUrl;
+      }
+    } else {
+      // Legacy behavior: save raw data as-is
+      dataToSave = hangupData;
+    }
+
+    // Insert the normalized record
+    await collection.insertOne(dataToSave);
+    console.log(`✅ Hangup data saved successfully (normalized: ${normalize})`);
+    return { status: 201, message: "Hangup data saved successfully." };
   } catch (error) {
-    console.error("Error saving  hangup data:", error);
+    console.error("Error saving hangup data:", error);
     return { status: 500, message: "Internal server error." };
   }
 }

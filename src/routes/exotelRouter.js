@@ -719,57 +719,45 @@ router.post('/save-log-data', async(req,res)=>{
        
        const result = await saveLogData(data)
        
-       // CRITICAL: Update hangup record with bot conversation data for proper merging  
+       // CRITICAL: Update hangup record with bot conversation data for proper merging
        if (result.status === 200 && data.callUUID) {
          try {
            const { connectToMongo, client } = require('../../models/mongodb.js');
+           const { normalizeBotCallback } = require('../apps/helper/callDataNormalizer.js');
            await connectToMongo();
            const database = client.db("talkGlimpass");
            const hangupCollection = database.collection("plivoHangupData");
-           
-           // Get existing record to preserve RecordUrl
-           const existingRecord = await hangupCollection.findOne({ CallUUID: data.callUUID });
-           
-           console.log(`🔍 DEBUG - Bot merge - Existing record RecordUrl:`, existingRecord?.RecordUrl);
-           
-           // Update hangup record with bot conversation data (preserve RecordUrl)
-           const hangupUpdate = {
-             $set: {
-               messages: data.messages || [],
-               conversation_time: data.conversation_time || null,
-               call_sid: data.call_sid || "",
-               stream_id: data.stream_id || "",
-               caller_number: data.caller_number || "",
-               ai_number: data.ai_number || "",
-               agent_id: data.agent_id || "",
-               lead_analysis: data.lead_analysis || null,
-               summary: data.summary || null,
-               chat: data.chat || null,
-               structuredOutputData: data.structuredOutputData || null,
-               caller: data.caller || "",
-               exophone: data.exophone || "",
-               // Mark that bot data has been merged
-               botDataMerged: new Date(),
-               // CRITICAL: Preserve existing RecordUrl if it exists
-               ...(existingRecord?.RecordUrl && { RecordUrl: existingRecord.RecordUrl })
-             }
-           };
-           
-           console.log(`🔍 DEBUG - Bot merge update RecordUrl:`, hangupUpdate.$set.RecordUrl);
-           
-           const mergeResult = await hangupCollection.updateOne(
-             { CallUUID: data.callUUID },
-             hangupUpdate
-           );
-           
-           if (mergeResult.modifiedCount > 0) {
-             console.log(`✅ Bot conversation data merged with hangup record: ${data.callUUID}`);
-             
-             // Check final state after merge
-             const finalRecord = await hangupCollection.findOne({ CallUUID: data.callUUID }, { RecordUrl: 1 });
-             console.log(`🔍 DEBUG - Final record after bot merge RecordUrl:`, finalRecord?.RecordUrl);
-           } else {
+
+           // Find existing record - check both old (CallUUID) and new (callUUID) formats
+           const existingRecord = await hangupCollection.findOne({
+             $or: [{ CallUUID: data.callUUID }, { callUUID: data.callUUID }]
+           });
+
+           if (!existingRecord) {
              console.warn(`⚠️ No hangup record found to merge bot data: ${data.callUUID}`);
+           } else {
+             // Use normalizer to clean bot data
+             const normalizedBotData = normalizeBotCallback(data);
+
+             // Preserve existing recording URL
+             const recordingUrl = existingRecord.recordingUrl || existingRecord.RecordUrl;
+             if (recordingUrl) {
+               normalizedBotData.recordingUrl = recordingUrl;
+             }
+
+             // Build query to match either format
+             const query = existingRecord.callUUID
+               ? { callUUID: data.callUUID }
+               : { CallUUID: data.callUUID };
+
+             const mergeResult = await hangupCollection.updateOne(
+               query,
+               { $set: normalizedBotData }
+             );
+
+             if (mergeResult.modifiedCount > 0) {
+               console.log(`✅ Bot conversation data merged with hangup record: ${data.callUUID}`);
+             }
            }
          } catch (mergeError) {
            console.error(`❌ Failed to merge bot data with hangup record:`, mergeError);
