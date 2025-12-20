@@ -20,6 +20,9 @@ class TwilioAdapter {
       // SIMPLE FIX: Generate UUID upfront and save call record BEFORE API call (like legacy Plivo)
       const preGeneratedUUID = uuidv4();
       
+      // Extract assistantId from dynamicFields for proper tracking
+      const assistantId = dynamicFields?.assistantId || '';
+
       // Save call record immediately to prevent race condition
       const { trackCallStart } = require('../apps/helper/activeCalls.js');
       const trackingData = {
@@ -30,6 +33,8 @@ class TwilioAdapter {
         to: to,
         firstName: firstName || '',
         listId: listId,
+        tag: tag || '',
+        assistantId: assistantId, // Store assistantId for hangup lookup
         provider: 'twilio'
       };
       

@@ -153,15 +153,20 @@ router.post('/xml-plivo', (req, res) => {
     }
 
     // Build extraHeaders with minimal system fields only
-    const extraHeaders = [
+    // Filter out undefined/null values to avoid passing "undefined" as string
+    const extraHeaderParts = [
         `from=${sanitizedFrom}`,
         `to=${sanitizedTo}`,
         `callUUID=${CallUUID}`,
-        `listId=${listId}`,
-        `clientId=${clientId}`,
-        `campId=${campId}`,
         `provider=plivo`
-    ].join(',');
+    ];
+
+    // Only add optional params if they have actual values
+    if (listId && listId !== 'undefined') extraHeaderParts.push(`listId=${listId}`);
+    if (clientId && clientId !== 'undefined') extraHeaderParts.push(`clientId=${clientId}`);
+    if (campId && campId !== 'undefined') extraHeaderParts.push(`campId=${campId}`);
+
+    const extraHeaders = extraHeaderParts.join(',');
 
     console.log(`✅ [XML] Generated extraHeaders (${extraHeaders.length} chars)`);
     console.log(`🔗 [XML] extraHeaders:`, extraHeaders);

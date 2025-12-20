@@ -25,6 +25,9 @@ class PlivoAdapter {
 
       const campId = campaignId || 'direct';
 
+      // Extract assistantId from dynamicFields for hangup URL (needed for client lookup)
+      const assistantId = dynamicFields?.assistantId || '';
+
       // Build answer_url with all parameters including dynamic CSV fields
       const answerUrlParams = new URLSearchParams({
         wss: wssUrl,
@@ -55,7 +58,7 @@ class PlivoAdapter {
         from,
         to,
         ring_url: `${baseUrl}/plivo/ring-url`,
-        hangup_url: `${baseUrl}/plivo/hangup-url?campId=${campId}&hangupFirstName=${firstName || ''}&tag=${tag || ''}`,
+        hangup_url: `${baseUrl}/plivo/hangup-url?campId=${campId}&hangupFirstName=${firstName || ''}&tag=${tag || ''}&assistantId=${assistantId}`,
         answer_url: answerUrl,
         answer_method: 'POST',
       };

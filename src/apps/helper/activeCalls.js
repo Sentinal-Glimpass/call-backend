@@ -215,6 +215,9 @@ async function trackCallStart(callData) {
       warmupAttempts: callData.warmupAttempts || null,
       warmupDuration: callData.warmupDuration || null,
       provider: callData.provider || 'plivo', // NEW: Track provider used
+      tag: callData.tag || null, // Custom tag for call identification
+      assistantId: callData.assistantId || null, // Assistant ID for client lookup
+      firstName: callData.firstName || null, // First name for display
       // Enhanced tracking for pause/resume
       contactIndex: callData.contactIndex || null,        // Position in campaign list
       sequenceNumber: callData.sequenceNumber || null,    // Unique sequence in campaign

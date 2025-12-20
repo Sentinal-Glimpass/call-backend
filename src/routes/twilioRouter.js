@@ -160,7 +160,7 @@ router.post('/status-callback', async (req, res) => {
       // CRITICAL: Look up call record by Twilio CallSid to get our pre-generated UUID and client info
       const callRecord = await activeCallsCollection.findOne(
         { twilioCallSid: CallSid },
-        { projection: { callUUID: 1, clientId: 1, campaignId: 1 } }
+        { projection: { callUUID: 1, clientId: 1, campaignId: 1, tag: 1, assistantId: 1, firstName: 1 } }
       );
       
       if (!callRecord) {

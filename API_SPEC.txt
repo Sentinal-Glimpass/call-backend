@@ -1,0 +1,276 @@
+================================================================================
+                        MARKAIBLE CALL API SPECIFICATION
+================================================================================
+
+Base URL: https://api.markaible.com
+
+Authentication: All endpoints require API key in header
+  Header: x-api-key: YOUR_API_KEY
+
+
+================================================================================
+1. INITIATE A CALL
+================================================================================
+
+POST /api/single-call
+
+Initiate an outbound call to a phone number using your AI assistant.
+
+REQUEST
+-------
+Headers:
+  x-api-key: YOUR_API_KEY
+  Content-Type: application/json
+
+Body (JSON):
+  {
+    "number": "+919876543210",       // Required - Phone number to call
+    "assistantId": "678782afa8d...", // Required - Your assistant ID
+    "fromNumber": "+918035735659",   // Required - Caller ID number
+    "firstName": "John",             // Optional - Contact first name
+    "email": "john@example.com",     // Optional - Contact email
+    "tag": "hubspot-lead",           // Optional - Custom tag for tracking
+    "transferNumber": "+919123456789", // Optional - Agent number for transfer
+    "company": "Acme Corp",          // Optional - Any custom variable
+    "productInterest": "Enterprise", // Optional - Any custom variable
+    "lastPurchase": "2024-01-15"     // Optional - Any custom variable
+  }
+
+Required Fields:
+  - number      : Phone number to call (with country code)
+  - assistantId : Assistant/Bot ID from your dashboard
+  - fromNumber  : Your registered caller ID number
+
+Optional Fields:
+  - firstName      : Contact's first name
+  - email          : Contact's email address
+  - tag            : Custom tag for categorization/tracking
+  - transferNumber : Phone number to transfer the call to (see below)
+  - [any key]      : Any additional custom variables
+
+Transfer Number:
+  The "transferNumber" field specifies where to transfer the call when the AI
+  assistant determines a human agent is needed. When provided, the AI can
+  initiate a warm transfer to connect the caller with a live agent.
+
+  Example:
+    "transferNumber": "+919876543210"
+
+  The transfer is triggered based on your assistant's prompt configuration.
+  Common triggers include:
+    - Customer requests to speak with a human
+    - AI determines the query requires human assistance
+    - Successful lead qualification completed
+
+Custom Variables:
+  You can pass ANY additional fields in the request body. All custom fields
+  are passed to the AI assistant's prompt and can be referenced during the
+  conversation. This allows you to personalize calls with CRM data, purchase
+  history, preferences, or any other contact information.
+
+  Examples:
+    "company": "Acme Corp"
+    "productInterest": "Enterprise Plan"
+    "appointmentDate": "2025-01-15"
+    "previousAgent": "Sarah"
+    "leadScore": 85
+    "customNote": "Prefers morning calls"
+
+RESPONSE
+--------
+Success (200):
+  {
+    "success": true,
+    "message": "Call initiated successfully",
+    "callUUID": "df402ea2-2f39-463e-a283-99eeb257e56a",
+    "assistantId": "678782afa8d9072894be7ca9"
+  }
+
+Error (400 - Bad Request):
+  {
+    "success": false,
+    "message": "Required fields: number, assistantId, fromNumber"
+  }
+
+Error (403 - Forbidden):
+  {
+    "success": false,
+    "message": "You do not have permission to use this assistant"
+  }
+
+Error (404 - Not Found):
+  {
+    "success": false,
+    "message": "Assistant not found with ID: 678782afa8d..."
+  }
+
+EXAMPLE
+-------
+curl -X POST "https://api.markaible.com/api/single-call" \
+  -H "x-api-key: YOUR_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "number": "+919876543210",
+    "assistantId": "678782afa8d9072894be7ca9",
+    "fromNumber": "+918035735659",
+    "firstName": "John",
+    "email": "john@example.com",
+    "tag": "website-lead",
+    "transferNumber": "+919123456789",
+    "company": "Acme Corp",
+    "productInterest": "Enterprise Plan",
+    "leadSource": "Google Ads"
+  }'
+
+
+================================================================================
+2. FETCH CALL DETAILS
+================================================================================
+
+NOTE: The complete data may not be availabe just after the call, so wait for at least 30s after the call ends before fetching the details.
+
+GET /api/call/:callUUID
+
+Fetch detailed information about a specific call including status, duration,
+recording, transcript, and AI analysis.
+
+REQUEST
+-------
+Headers:
+  x-api-key: YOUR_API_KEY
+
+Path Parameters:
+  callUUID : The unique call identifier (returned from /single-call)
+
+RESPONSE
+--------
+Success (200):
+  {
+    "success": true,
+    "data": {
+      "callUUID": "df402ea2-2f39-463e-a283-99eeb257e56a",
+      "to": "919876543210",
+      "from": "918035735659",
+      "duration": 57,
+      "status": "completed",
+      "hangupCause": "NORMAL_CLEARING",
+      "startTime": "2025-12-19 19:30:22",
+      "endTime": "2025-12-19 19:31:25",
+      "answerTime": "2025-12-19 19:30:29",
+      "recordingUrl": "https://...",
+      "transcript": [
+        { "role": "assistant", "content": "Hello, this is..." },
+        { "role": "user", "content": "Hi, yes..." }
+      ],
+      "leadAnalysis": {
+        "is_lead": "true",
+        "reason": "Customer showed interest in the product",
+        "next_action": "Schedule follow-up call"
+      },
+      "callSummary": "Customer interested in NEET preparation...",
+      "firstName": "John",
+      "email": "john@example.com",
+      "tag": "website-lead",
+      "assistantId": "678782afa8d9072894be7ca9"
+    }
+  }
+
+Error (403 - Forbidden):
+  {
+    "success": false,
+    "message": "You do not have permission to access this call"
+  }
+
+Error (404 - Not Found):
+  {
+    "success": false,
+    "message": "Call not found"
+  }
+
+RESPONSE FIELDS
+---------------
+Always Present:
+  callUUID     : string  - Unique call identifier
+  to           : string  - Called phone number
+  from         : string  - Caller phone number
+  duration     : integer - Call duration in seconds
+  status       : string  - Call status (see below)
+  hangupCause  : string  - Reason for call end
+  startTime    : string  - Call start timestamp
+  endTime      : string  - Call end timestamp
+
+Optional (included only when available):
+  answerTime       : string - When call was answered
+  recordingUrl     : string - URL to call recording (MP3)
+  transcript       : array  - Conversation messages
+  leadAnalysis     : object - AI lead qualification result
+  callSummary      : string - AI-generated call summary
+  structuredAnalysis: object - Detailed AI analysis
+  firstName        : string - Contact first name
+  email            : string - Contact email
+  tag              : string - Custom tag
+  assistantId      : string - Assistant ID used
+
+CALL STATUS VALUES
+------------------
+  completed  : Call was answered and ended normally
+  busy       : Called number was busy
+  no-answer  : No answer within timeout
+  failed     : Call failed to connect
+  canceled   : Call was canceled
+
+HANGUP CAUSE VALUES
+-------------------
+  NORMAL_CLEARING  : Normal call end
+  USER_BUSY        : User was busy
+  NO_ANSWER        : No answer
+  CALL_REJECTED    : Call was rejected
+  ORIGINATOR_CANCEL: Caller canceled
+
+EXAMPLE
+-------
+curl -X GET "https://api.markaible.com/api/call/df402ea2-2f39-463e-a283-99eeb257e56a" \
+  -H "x-api-key: YOUR_API_KEY"
+
+
+================================================================================
+ERROR CODES
+================================================================================
+
+HTTP Status Codes:
+  200 : Success
+  400 : Bad Request - Missing or invalid parameters
+  401 : Unauthorized - Missing API key
+  403 : Forbidden - Invalid API key or permission denied
+  404 : Not Found - Resource not found
+  500 : Internal Server Error
+
+All error responses follow this format:
+  {
+    "success": false,
+    "message": "Error description"
+  }
+
+
+================================================================================
+NOTES
+================================================================================
+
+1. Store the callUUID returned from /single-call to fetch call details later
+
+2. Call data (transcript, recording, analysis) may take a few seconds to be
+   available after the call ends. Poll the /call/:callUUID endpoint if needed.
+
+3. Recording URLs are temporary and may expire. Download recordings if you
+   need to store them permanently.
+
+4. The transcript array contains the full conversation in chronological order
+   with "assistant" (AI) and "user" (human) roles.
+
+5. leadAnalysis is generated by AI and includes:
+   - is_lead: Whether the contact is a qualified lead
+   - reason: Explanation for the qualification
+   - next_action: Recommended follow-up action
+
+
+================================================================================

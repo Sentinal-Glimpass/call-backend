@@ -106,6 +106,7 @@ function mapTwilioHangupToPlivoFormat(twilioData, callRecord) {
     campId: campId,
     clientId: clientId,
     tag: callRecord.tag || '',
+    assistantId: callRecord.assistantId || '', // Store assistantId for tracking
     hangupFirstName: callRecord.firstName || '',
     callType: campId,
     

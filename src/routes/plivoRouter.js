@@ -1917,7 +1917,7 @@ router.post('/ring-url', async (req, res) => {
 router.post('/hangup-url', async (req, res) => {
   try {
       const { CallUUID, To, CallDuration, HangupCause } = req.body;
-      const { campId, hangupFirstName, tag } = req.query;
+      const { campId, hangupFirstName, tag, assistantId: assistantIdParam } = req.query;
       
       if (!CallUUID) return res.status(400).json({ message: "Missing CallUUID" });
       
@@ -1928,7 +1928,8 @@ router.post('/hangup-url', async (req, res) => {
       hangupData.campId = campId ?? 'incoming';
       hangupData.hangupFirstName = hangupFirstName ?? '';
       hangupData.tag = tag ?? '';
-      
+      hangupData.assistantId = assistantIdParam ?? ''; // Store assistantId for tracking
+
       // Process billing using NEW billing system
       console.log(`💰 Processing billing for call: ${CallUUID}, Type: ${hangupData.campId}, Duration: ${hangupData.Duration}s`);
       
@@ -1994,11 +1995,18 @@ router.post('/hangup-url', async (req, res) => {
               });
             }
         } else {
-          // For test calls, api calls, and campaigns, tag contains assistantId - need to lookup client
-          const assistantId = hangupData.tag;
+          // For test calls, api calls, and campaigns, need to lookup client via assistantId
+          // Priority: 1) assistantId query param (new), 2) tag (legacy fallback for old calls)
+          const assistantId = assistantIdParam || hangupData.tag;
           if (!assistantId) {
-            console.error('❌ No assistantId found in tag for', callType, 'call');
-            return res.status(400).json({ message: `No assistantId found in tag for ${callType} call` });
+            console.error('❌ No assistantId found for', callType, 'call');
+            return res.status(400).json({ message: `No assistantId found for ${callType} call` });
+          }
+
+          // Validate assistantId is a valid ObjectId format (24 hex characters)
+          if (!/^[0-9a-fA-F]{24}$/.test(assistantId)) {
+            console.error(`❌ Invalid assistantId format: ${assistantId} (not a valid ObjectId)`);
+            return res.status(400).json({ message: `Invalid assistantId format: ${assistantId}. Expected 24 character hex string.` });
           }
 
           // Step 1: Find client that owns this assistant

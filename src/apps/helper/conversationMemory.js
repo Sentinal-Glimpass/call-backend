@@ -19,6 +19,47 @@ function normalizePhoneNumber(phoneNumber) {
 }
 
 /**
+ * Check if a value is a valid/usable ID (not undefined, null, or invalid string)
+ * @param {string} id - ID to check
+ * @returns {boolean} True if valid
+ */
+function isValidId(id) {
+  return id && id !== 'undefined' && id !== 'null' && ObjectId.isValid(id);
+}
+
+/**
+ * Look up clientId from assistantId
+ * @param {string} assistantId - Assistant ID to look up
+ * @returns {Promise<string|null>} Client ID or null if not found
+ */
+async function getClientIdFromAssistant(assistantId) {
+  try {
+    if (!isValidId(assistantId)) {
+      return null;
+    }
+
+    await connectToMongo();
+    const database = client.db("talkGlimpass");
+    const assistantCollection = database.collection("assistant");
+
+    const assistant = await assistantCollection.findOne(
+      { _id: new ObjectId(assistantId) },
+      { projection: { clientId: 1 } }
+    );
+
+    if (assistant && assistant.clientId) {
+      console.log(`🔍 Looked up clientId ${assistant.clientId} from assistantId ${assistantId}`);
+      return assistant.clientId.toString();
+    }
+
+    return null;
+  } catch (error) {
+    console.error('❌ Error looking up clientId from assistantId:', error);
+    return null;
+  }
+}
+
+/**
  * Save or update conversation context
  * @param {Object} memoryData - Memory data to save
  * @returns {Promise<Object>} Result object
@@ -29,15 +70,29 @@ async function saveConversationContext(memoryData) {
     const database = client.db("talkGlimpass");
     const memoryCollection = database.collection("conversationMemory");
 
-    const { phoneNumber, clientId, assistantId, globalContext, agentContext } = memoryData;
+    let { phoneNumber, clientId, assistantId, globalContext, agentContext } = memoryData;
 
-    // Validate required fields
-    if (!phoneNumber || !clientId || !assistantId) {
+    // Validate phoneNumber and assistantId are required
+    if (!phoneNumber || !isValidId(assistantId)) {
       return {
         status: 400,
         success: false,
-        message: 'Required fields: phoneNumber, clientId, assistantId'
+        message: 'Required fields: phoneNumber, assistantId (valid ObjectId)'
       };
+    }
+
+    // If clientId is missing/invalid, look it up from assistantId
+    if (!isValidId(clientId)) {
+      console.log(`⚠️ clientId missing or invalid (${clientId}), looking up from assistantId...`);
+      clientId = await getClientIdFromAssistant(assistantId);
+
+      if (!clientId) {
+        return {
+          status: 400,
+          success: false,
+          message: 'Could not determine clientId from assistantId'
+        };
+      }
     }
 
     // Normalize phone number
@@ -110,10 +165,26 @@ async function getConversationContext(query) {
     const database = client.db("talkGlimpass");
     const memoryCollection = database.collection("conversationMemory");
 
-    const { phoneNumber, clientId, assistantId } = query;
+    let { phoneNumber, clientId, assistantId } = query;
 
-    if (!phoneNumber || !clientId) {
+    // Validate phoneNumber is required
+    if (!phoneNumber) {
       return null;
+    }
+
+    // Validate assistantId if provided
+    if (assistantId && !isValidId(assistantId)) {
+      return null;
+    }
+
+    // If clientId is missing/invalid but assistantId is valid, look it up
+    if (!isValidId(clientId)) {
+      if (isValidId(assistantId)) {
+        clientId = await getClientIdFromAssistant(assistantId);
+      }
+      if (!clientId) {
+        return null;
+      }
     }
 
     const normalizedPhone = normalizePhoneNumber(phoneNumber);
@@ -148,14 +219,38 @@ async function deleteConversationContext(query) {
     const database = client.db("talkGlimpass");
     const memoryCollection = database.collection("conversationMemory");
 
-    const { phoneNumber, clientId, assistantId } = query;
+    let { phoneNumber, clientId, assistantId } = query;
 
-    if (!phoneNumber || !clientId) {
+    // Validate phoneNumber is required
+    if (!phoneNumber) {
       return {
         status: 400,
         success: false,
-        message: 'Required fields: phoneNumber, clientId'
+        message: 'Required field: phoneNumber'
       };
+    }
+
+    // Validate assistantId if provided
+    if (assistantId && !isValidId(assistantId)) {
+      return {
+        status: 400,
+        success: false,
+        message: 'assistantId must be a valid ObjectId'
+      };
+    }
+
+    // If clientId is missing/invalid but assistantId is valid, look it up
+    if (!isValidId(clientId)) {
+      if (isValidId(assistantId)) {
+        clientId = await getClientIdFromAssistant(assistantId);
+      }
+      if (!clientId) {
+        return {
+          status: 400,
+          success: false,
+          message: 'Required: clientId or valid assistantId to look up clientId'
+        };
+      }
     }
 
     const normalizedPhone = normalizePhoneNumber(phoneNumber);
@@ -191,6 +286,8 @@ async function deleteConversationContext(query) {
 
 module.exports = {
   normalizePhoneNumber,
+  isValidId,
+  getClientIdFromAssistant,
   saveConversationContext,
   getConversationContext,
   deleteConversationContext
