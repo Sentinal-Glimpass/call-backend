@@ -2763,23 +2763,34 @@ async function getApiCallReport(clientId) {
 
     console.log(`📊 Fetching API call report for clientId: ${clientIdStr}`);
 
-    // Fetch all hangup data for API calls (campId = 'api-call') filtered by clientId
+    // Fetch all hangup data for API calls filtered by clientId
+    // Support both normalized format (source='api') and legacy format (campId='api-call')
     // Include both Plivo and Twilio API calls for unified reporting
     // Use aggregation pipeline to convert EndTime string to Date for proper sorting
     const hangupDataDocs = await hangupCollection.aggregate([
       {
         $match: {
-          campId: 'api-call',
-          clientId: clientIdStr
+          clientId: clientIdStr,
+          // Support both normalized (source='api') and legacy (campId='api-call') formats
+          $or: [
+            { source: 'api' },
+            { campId: 'api-call' }
+          ]
         }
       },
       {
         $addFields: {
-          // Convert EndTime string to Date for sorting, fallback to createdAt if EndTime missing
+          // Convert EndTime/endTime string to Date for sorting, fallback to createdAt if missing
+          // Support both normalized (endTime) and legacy (EndTime) field names
           sortDate: {
             $cond: {
-              if: { $ne: ["$EndTime", null] },
-              then: { $dateFromString: { dateString: "$EndTime", onError: "$createdAt" } },
+              if: { $or: [{ $ne: ["$EndTime", null] }, { $ne: ["$endTime", null] }] },
+              then: {
+                $dateFromString: {
+                  dateString: { $ifNull: ["$EndTime", "$endTime"] },
+                  onError: "$createdAt"
+                }
+              },
               else: "$createdAt"
             }
           }
@@ -2801,13 +2812,15 @@ async function getApiCallReport(clientId) {
     console.log(`📊 Found ${hangupDataDocs.length} API calls for clientId: ${clientIdStr}`);
 
     // Extract unique CallUUIDs from hangupData
-    const callUUIDs = hangupDataDocs.map(doc => doc.CallUUID);
+    // Support both normalized (callUUID) and legacy (CallUUID) field names
+    const callUUIDs = hangupDataDocs.map(doc => doc.callUUID || doc.CallUUID).filter(Boolean);
 
     // Fetch all logData documents based on CallUUIDs (contains bot callback data, lead analysis, etc.)
     const logDataDocs = await logCollection.find({ callUUID: { $in: callUUIDs } }).toArray();
 
     // Calculate total conversation time from hangup data (more accurate)
-    const totalConversationTime = hangupDataDocs.reduce((sum, doc) => sum + (parseInt(doc.Duration) || 0), 0);
+    // Support both normalized (duration) and legacy (Duration) field names
+    const totalConversationTime = hangupDataDocs.reduce((sum, doc) => sum + (parseInt(doc.duration || doc.Duration) || 0), 0);
 
     // Group log data by CallUUID and get the latest entry using ObjectId comparison
     const latestLogDataMap = new Map();
@@ -2826,12 +2839,17 @@ async function getApiCallReport(clientId) {
 
     // Merge logData and record URLs into hangupData (following same pattern as campaign/incoming reports)
     const mergedData = hangupDataDocs.map(hangupDoc => {
-      const logData = latestLogDataMap.get(hangupDoc.CallUUID) || {};
+      // Support both normalized (callUUID) and legacy (CallUUID) field names
+      const docCallUUID = hangupDoc.callUUID || hangupDoc.CallUUID;
+      const logData = latestLogDataMap.get(docCallUUID) || {};
       return {
         ...hangupDoc,
         ...logData, // Merge latest log data (includes bot callback data, lead analysis, conversation logs)
-        // CRITICAL: Preserve RecordUrl from hangup data (Twilio), fallback to record collection (Plivo)
-        RecordUrl: hangupDoc.RecordUrl || recordMap.get(hangupDoc.CallUUID) || null,
+        // Normalize CallUUID field for consistent API response
+        CallUUID: docCallUUID,
+        // CRITICAL: Preserve recording URL from hangup data (Twilio), fallback to record collection (Plivo)
+        // Support both normalized (recordingUrl) and legacy (RecordUrl) field names
+        RecordUrl: hangupDoc.recordingUrl || hangupDoc.RecordUrl || recordMap.get(docCallUUID) || null,
         callType: 'api-call' // Mark as API call for identification
       };
     });
