@@ -42,6 +42,7 @@ const emailRouter = require('./src/routes/tools/emailRouter');
 const mcpRouter = require('./src/routes/tools/mcpRouter');
 const botIntegrationRouter = require('./src/routes/botIntegrationRouter');
 const mcpHttpRouter = require('./src/routes/mcpHttpRouter');
+const flowsRouter = require('./src/routes/flowsRouter');
 const apiKeyValidator = require('./src/middleware/apiKeyValidator')
 const { apiLogger, requestCounter } = require('./src/middleware/apiLogger')
 // const { apiLimiter } = require('./src/middleware/authMiddleware')
@@ -272,6 +273,7 @@ app.use('/api/tools/mcp', mcpRouter); // New MCP tool endpoints
 app.use('/api/bot-integration', botIntegrationRouter); // Unified bot integration API
 app.use('/mcp', mcpHttpRouter); // HTTP MCP server endpoints for cross-server communication
 app.use('/wati', toolsRouter); // Legacy direct mount for WATI endpoints
+app.use('/api/flows', flowsRouter); // Flow-based agent conversation management
 
 // LEGACY ROUTES - DEPRECATED (DO NOT USE)
 // app.use('/graph', creatorRouter);
