@@ -591,8 +591,10 @@ async function getHangupDataCountByCampaignId(campId) {
     const database = client.db("talkGlimpass");
     const collection = database.collection("plivoHangupData");
 
-    // Count documents where campaignId matches
-    const count = await collection.countDocuments({ campId });
+    // Count documents where campaignId matches (support both old 'campId' and new 'campaignId' field names)
+    const count = await collection.countDocuments({
+      $or: [{ campId }, { campaignId: campId }]
+    });
 
     return count;
   } catch (error) {
@@ -664,7 +666,8 @@ async function getMergedLogData(campId, cursor = null, limit = 100, isDownload =
     const recordCollection = database.collection("plivoRecordData");
 
     // Build query with cursor for pagination and filtering
-    const query = { campId };
+    // Support both old 'campId' and new 'campaignId' field names
+    const query = { $or: [{ campId }, { campaignId: campId }] };
     
     // Apply filters if provided
     if (filters) {
@@ -970,8 +973,8 @@ async function getMergedLogData(campId, cursor = null, limit = 100, isDownload =
       nextCursor = hasNextPage ? hangupDataDocs[hangupDataDocs.length - 1]._id.toString() : null;
     }
 
-    // Extract unique CallUUIDs from hangupData
-    const callUUIDs = hangupDataDocs.map(doc => doc.CallUUID);
+    // Extract unique CallUUIDs from hangupData (support both old 'CallUUID' and new 'callUUID' field names)
+    const callUUIDs = hangupDataDocs.map(doc => doc.CallUUID || doc.callUUID).filter(Boolean);
 
     // PERFORMANCE OPTIMIZATION: Parallel fetch of related data with timeouts
     const [logDataDocs, recordDataDocs] = await Promise.allSettled([
@@ -994,7 +997,7 @@ async function getMergedLogData(campId, cursor = null, limit = 100, isDownload =
     }
 
     // Calculate duration for this page
-    const pageDuration = hangupDataDocs.reduce((sum, doc) => sum + (parseInt(doc.Duration) || 0), 0);
+    const pageDuration = hangupDataDocs.reduce((sum, doc) => sum + (parseInt(doc.duration || doc.Duration) || 0), 0);
 
     // Group log data by CallUUID and get the latest entry using ObjectId
     const latestLogDataMap = new Map();
@@ -1010,12 +1013,14 @@ async function getMergedLogData(campId, cursor = null, limit = 100, isDownload =
 
     // Merge logData and record URLs into hangupData
     const mergedData = hangupDataDocs.map(hangupDoc => {
-      const logData = latestLogDataMap.get(hangupDoc.CallUUID) || {};
+      // Support both old 'CallUUID' and new 'callUUID' field names
+      const docCallUUID = hangupDoc.CallUUID || hangupDoc.callUUID;
+      const logData = latestLogDataMap.get(docCallUUID) || {};
       return {
         ...hangupDoc,
         ...logData, // Merge latest log data
         // CRITICAL: Preserve RecordUrl from hangup data (Twilio), fallback to record collection (Plivo)
-        RecordUrl: hangupDoc.RecordUrl || recordMap.get(hangupDoc.CallUUID) || null,
+        RecordUrl: hangupDoc.RecordUrl || hangupDoc.recordingUrl || recordMap.get(docCallUUID) || null,
       };
     });
 
@@ -1225,12 +1230,14 @@ async function getIncomingReport(fromNumber, cursor = null, limit = 20, dateRang
 
     // Merge logData and record URLs into hangupData
     const mergedData = hangupDataDocs.map(hangupDoc => {
-      const logData = latestLogDataMap.get(hangupDoc.CallUUID) || {};
+      // Support both old 'CallUUID' and new 'callUUID' field names
+      const docCallUUID = hangupDoc.CallUUID || hangupDoc.callUUID;
+      const logData = latestLogDataMap.get(docCallUUID) || {};
       return {
         ...hangupDoc,
         ...logData, // Merge latest log data
         // CRITICAL: Preserve RecordUrl from hangup data (Twilio), fallback to record collection (Plivo)
-        RecordUrl: hangupDoc.RecordUrl || recordMap.get(hangupDoc.CallUUID) || null,
+        RecordUrl: hangupDoc.RecordUrl || hangupDoc.recordingUrl || recordMap.get(docCallUUID) || null,
       };
     });
 
@@ -1385,8 +1392,12 @@ async function getFailedCallsFromCampaign(campId) {
 
     const pendingCalls = await collection
       .find({
-        campId: campId,
-        CallStatus: { $ne: "completed" },
+        // Support both old 'campId' and new 'campaignId' field names
+        $or: [{ campId: campId }, { campaignId: campId }],
+        // Support both old 'CallStatus' and new 'status' field names
+        $and: [
+          { $or: [{ CallStatus: { $ne: "completed" } }, { status: { $ne: "completed" } }] }
+        ]
       })
       .toArray();
 
@@ -2698,14 +2709,15 @@ async function getTestCallReport(clientId) {
 
     console.log(`📊 Found ${hangupDataDocs.length} test calls for clientId: ${clientIdStr}`);
 
-    // Extract unique CallUUIDs from hangupData
-    const callUUIDs = hangupDataDocs.map(doc => doc.CallUUID);
+    // Extract unique CallUUIDs from hangupData (support both old 'CallUUID' and new 'callUUID' field names)
+    const callUUIDs = hangupDataDocs.map(doc => doc.CallUUID || doc.callUUID).filter(Boolean);
 
     // Fetch all logData documents based on CallUUIDs (contains bot callback data, lead analysis, etc.)
     const logDataDocs = await logCollection.find({ callUUID: { $in: callUUIDs } }).toArray();
 
     // Calculate total conversation time from hangup data (more accurate)
-    const totalConversationTime = hangupDataDocs.reduce((sum, doc) => sum + (parseInt(doc.Duration) || 0), 0);
+    // Support both old 'Duration' and new 'duration' field names
+    const totalConversationTime = hangupDataDocs.reduce((sum, doc) => sum + (parseInt(doc.duration || doc.Duration) || 0), 0);
 
     // Group log data by CallUUID and get the latest entry using ObjectId comparison
     const latestLogDataMap = new Map();
@@ -2875,8 +2887,9 @@ async function getCampaignAnalytics(campaignId) {
     const database = client.db("talkGlimpass");
     
     // Pipeline 1: Campaign basic stats from hangup data
+    // Support both old 'campId' and new 'campaignId' field names
     const campaignStatsAggregation = [
-      { $match: { campId: campaignId } },
+      { $match: { $or: [{ campId: campaignId }, { campaignId: campaignId }] } },
       {
         $group: {
           _id: null,
@@ -2899,16 +2912,18 @@ async function getCampaignAnalytics(campaignId) {
     // Pipeline 2: Simplified lead analysis - direct query on logData
     const leadAnalysis = await database.collection("logData")
       .find({
-        campId: campaignId,
-        $or: [
+        $and: [
+          // Support both old 'campId' and new 'campaignId' field names
+          { $or: [{ campId: campaignId }, { campaignId: campaignId }] },
+          { $or: [
           { is_lead: { $regex: /(true|maybe|1)/i } },
           { "lead_analysis.is_lead": { $regex: /(true|maybe|1)/i } },
           { leadAnalysis_is_lead: { $regex: /(true|maybe|1)/i } },
           { lead_status: { $regex: /(true|maybe|1)/i } },
           { isLead: { $regex: /(true|maybe|1)/i } },
           { "lead_analysis.lead_score": { $gt: 0 } }
-        ]
-      }).toArray();
+        ]}
+      ]}).toArray();
     
     const totalLeads = leadAnalysis.length;
     
