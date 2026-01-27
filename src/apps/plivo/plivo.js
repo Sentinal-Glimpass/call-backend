@@ -2671,24 +2671,34 @@ async function getTestCallReport(clientId) {
 
     console.log(`📊 Fetching test call report for clientId: ${clientIdStr}`);
 
-    // Fetch all hangup data for test calls (campId = 'testcall') filtered by clientId
+    // Fetch all hangup data for test calls filtered by clientId
+    // Support both legacy format (campId='testcall') and normalized format (source='test')
     // Include both Plivo and Twilio test calls for unified reporting
     // Use aggregation pipeline to convert EndTime string to Date for proper sorting
     const hangupDataDocs = await hangupCollection.aggregate([
       {
         $match: {
-          campId: 'testcall',
+          $or: [
+            { campId: 'testcall' },  // Legacy format
+            { source: 'test' }       // Normalized format
+          ],
           clientId: clientIdStr
           // No provider filter - include both Plivo and Twilio calls
         }
       },
       {
         $addFields: {
-          // Convert EndTime string to Date for sorting, fallback to createdAt if EndTime missing
+          // Convert EndTime/endTime string to Date for sorting, fallback to createdAt if missing
+          // Support both legacy (EndTime) and normalized (endTime) field names
           sortDate: {
             $cond: {
-              if: { $ne: ["$EndTime", null] },
-              then: { $dateFromString: { dateString: "$EndTime", onError: "$createdAt" } },
+              if: { $or: [{ $ne: ["$EndTime", null] }, { $ne: ["$endTime", null] }] },
+              then: {
+                $dateFromString: {
+                  dateString: { $ifNull: ["$EndTime", "$endTime"] },
+                  onError: "$createdAt"
+                }
+              },
               else: "$createdAt"
             }
           }
