@@ -2746,12 +2746,17 @@ async function getTestCallReport(clientId) {
 
     // Merge logData and record URLs into hangupData (following same pattern as campaign/incoming reports)
     const mergedData = hangupDataDocs.map(hangupDoc => {
-      const logData = latestLogDataMap.get(hangupDoc.CallUUID) || {};
+      // Support both normalized (callUUID) and legacy (CallUUID) field names
+      const docCallUUID = hangupDoc.callUUID || hangupDoc.CallUUID;
+      const logData = latestLogDataMap.get(docCallUUID) || {};
       return {
         ...hangupDoc,
         ...logData, // Merge latest log data (includes bot callback data, lead analysis, conversation logs)
-        // CRITICAL: Preserve RecordUrl from hangup data (Twilio), fallback to record collection (Plivo)
-        RecordUrl: hangupDoc.RecordUrl || recordMap.get(hangupDoc.CallUUID) || null,
+        // Normalize CallUUID field for consistent API response
+        CallUUID: docCallUUID,
+        // CRITICAL: Preserve recording URL from hangup data (Twilio), fallback to record collection (Plivo)
+        // Support both normalized (recordingUrl) and legacy (RecordUrl) field names
+        RecordUrl: hangupDoc.recordingUrl || hangupDoc.RecordUrl || recordMap.get(docCallUUID) || null,
         callType: 'testcall' // Mark as test call for identification
       };
     });
