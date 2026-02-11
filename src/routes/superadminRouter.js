@@ -504,7 +504,7 @@ router.post('/single-call', async (req, res) => {
     const billingClientId = clientId || 'SUPERADMIN';
 
     // Warmup the bot pod before making the call
-    const { warmupBotWithRetry } = require('../../utils/botWarmup.js');
+    const { warmupBotWithRetry } = require('../utils/botWarmup.js');
     const warmupEnabled = process.env.BOT_WARMUP_ENABLED !== 'false';
 
     if (warmupEnabled && wssUrl) {
