@@ -503,6 +503,27 @@ router.post('/single-call', async (req, res) => {
     // Use 'SUPERADMIN' as billing identifier if no clientId provided
     const billingClientId = clientId || 'SUPERADMIN';
 
+    // Warmup the bot pod before making the call
+    const { warmupBotWithRetry } = require('../../utils/botWarmup.js');
+    const warmupEnabled = process.env.BOT_WARMUP_ENABLED !== 'false';
+
+    if (warmupEnabled && wssUrl) {
+      try {
+        const wsUrl = new URL(wssUrl);
+        const protocol = wsUrl.protocol === 'wss:' ? 'https:' : 'http:';
+        const botWarmupUrl = `${protocol}//${wsUrl.host}/warmup`;
+        console.log(`🤖 Superadmin: warming up bot at ${botWarmupUrl}`);
+        const warmupResult = await warmupBotWithRetry(botWarmupUrl);
+        if (!warmupResult.success) {
+          console.warn(`⚠️ Bot warmup failed but proceeding with call: ${warmupResult.error}`);
+        } else {
+          console.log(`✅ Bot warmup done (${warmupResult.duration}ms, ${warmupResult.attempts} attempts)`);
+        }
+      } catch (warmupError) {
+        console.warn(`⚠️ Bot warmup error (proceeding anyway): ${warmupError.message}`);
+      }
+    }
+
     const result = await initiatePlivoCall(from, to, wssUrl, billingClientId, assistantId);
     res.status(200).json({ success: true, message: 'Call initiated', data: result });
   } catch (error) {
