@@ -9,28 +9,9 @@ const fs = require('fs');
 const cosineSimilarity = require('cosine-similarity');
 const FormData = require('form-data');
 require ('dotenv').config();
-// const { Configuration, OpenAIApi } = require('openai');
-const { AzureOpenAI } = require("openai");
 const { zodResponseFormat } = require('openai/helpers/zod');
-const { z, promise } = require('zod');
+const { z } = require('zod');
 const createCsvWriter = require('csv-writer').createObjectCsvWriter;
-
-
-// const configuration = new Configuration({
-//   apiKey: process.env.OPENAI_API_KEY,
-// }); 
-// const openai = new OpenAIApi(configuration);
-// const openai = new OpenAI({
-//   apiKey: process.env.OPENAI_API_KEY // This is also the default, can be omitted
-// });
-
-const endpoint = process.env.AZURE_ENDPOINT;
-const apiKey = process.env.AZURE_OPENAI_API_KEY;
-
-const apiVersion = "2024-08-01-preview";
-const deployment = "gpt-4o"; //This must match your deployment name.
-
-const openaiClient = new AzureOpenAI({ endpoint, apiKey, apiVersion, deployment });
 
 async function getEmbedding(text) {
   try {
@@ -645,11 +626,12 @@ async function processCampaignDataAsync(campaignId, duration, clientId, prompt, 
         if (logDataEntry) {
           callData.chat = logDataEntry.chat;
           callData.agent_id = logDataEntry.agent_id;
-          callData.objective_qualified_data = logDataEntry.structuredOutputData;
-          if(logDataEntry.chat){
-            hotLead += logDataEntry.structuredOutputData.hotLead;
-            coldLead += logDataEntry.structuredOutputData.coldLead;
-            warmLead += logDataEntry.structuredOutputData.warmLead;
+          callData.objective_qualified_data = logDataEntry.lead_analysis;
+          if(logDataEntry.lead_analysis && logDataEntry.lead_analysis.lead_category){
+            const category = logDataEntry.lead_analysis.lead_category.toLowerCase();
+            if (category === 'hot') hotLead++;
+            else if (category === 'cold') coldLead++;
+            else if (category === 'warm') warmLead++;
           }
         }
         if(callData.status == 'completed'){
@@ -1266,67 +1248,11 @@ async function isObjectiveQualifiedLead(chat, prompt){
   }
 }
 
-const qualifiedLeadTypeSchema  = z.object({
-  hotLead: z.number(),
-  coldLead: z.number(),
-  warmLead: z.number(),
-  explanation: z.string(),
-  whatsappMessage:z.number(),
-  name: z.string(),
-  detailedSummary: z.string(),
-  problem: z.string(),
-  notSure: z.string(),
-  hotLead1: z.number(),
-  coldLead1: z.number(),
-  warmLead1: z.number(),
-})
-async function getQualifiedLeadType(chat, prompt, campDetails){
-  try {
-    if(!campDetails|| campDetails == null){
-      campDetails.hotCond = 'After analyzing the whole chat, output True if the chat shows the customer is ready to make a purchase or take immediate action, and False otherwise.'
-      campDetails.warmCond = 'After analyzing the whole chat, output True if the chat shows little to no interest or engagement from the customer, indicating no immediate need or purchase intent, and False otherwise.'
-    }
-    const response = await openaiClient.chat.completions.create({
-      model: "gpt-4o",
-      messages: [
-        { role: 'system', content: `You are a world renowned data analyst known for your exceptional data analysis skills.
-         Your job is to do the following task:
-        1. check the OBJECTIVE to understand what the user wants
-        2. look at a chat between an AI and a customer and understand the full conversation
-        3. Finally, give a json of response with nine keys :
-        a. explanation : explain why the given CHAT should or should not be returned to the user based on what user wants. 
-        b. hotLead: It will be hot lead if it fullfills any of the following conditions ${campDetails.hotCond}
-        c. warmLead: It will be warm lead if it fullfills any of the following conditions ${campDetails.warmCond}
-        d. coldLead: After analyzing the whole chat, output True if the chat shows little to no interest or engagement from the customer, indicating no immediate need or purchase intent, and False otherwise.
-        e. notSure: True if the lead type (hot, cold, warm) is unclear or uncertain, voicemail and machine detection. False otherwise.
-        e. whatsappMessage: Output true if user has asked to send whatsapp message, and false otherwise
-        f. name: Extract the customer's name if it's present in the chat otherwise name will be an empty string.
-        g  detailedSummary: "Given the past conversation summary, add any important information from the current chat. Remember to not remove any information from the past summary, you can compact it, the new summary must show a story of the user's entire history. In case there is no summary summarize the chat in 3rd person:- the user's name, age (if mentioned), gender (if mentioned), and problem or request and response described during the conversation."
-        h  problem: "Summary of the user's primary issue, request, or symptoms described.it should consists of one sentence"
-        i. hotLead1: After analyzing the whole chat, output True if the chat shows the customer is ready to make a purchase or take immediate action, and False otherwise.
-        j. coldLead1: After analyzing the whole chat, output True if the chat shows little to no interest or engagement from the customer, indicating no immediate need or purchase intent, and False otherwise.
-        k. warmLead:1 After analyzing the whole chat, output True if the chat shows interest and engagement but without immediate purchase intent, indicating the customer needs more time or information, and False otherwise
-        NOTE: If the conversation is too short isQualified is always False. SO make sure that there is enough conversation to tell anything.
-        IMPORTANT: The chat between human and AI is divided by a pipe '|' so the human answer is for the question just before the pipe. So Isqualified will only be true if the person's positive answer is just after the question just before the answer.` },
-        { role: 'user', content: `following is the CHAT between an AI and a customer and OBJECTIVE given by user:
-        1. CHAT: ${chat}
-        2. OBJECTIVE: ${prompt}` },
-      ],
-      response_format: zodResponseFormat(qualifiedLeadTypeSchema, "structuredData"),
-    });
-    const structuredData = response.choices[0].message;
-    return structuredData.content;
-  } catch (error) {
-    console.error('Error:', error);
-    throw new Error('Failed to analyze chat and parse structured data.');
-  }
-}
-
 async function saveLogData(data) {
   try {
     await connectToMongo();
-    const prompt = {True: 'given the objective, if the response of the user is positive', False: 'given the objective, if the response of the user is not positive'};
-    // Format the chat from messages array
+
+    // Format the chat from messages array (for storage/display, no inference)
     if (data.messages && Array.isArray(data.messages)) {
       data.chat = data.messages.map(msg => {
         if (msg.role === "assistant") {
@@ -1335,32 +1261,16 @@ async function saveLogData(data) {
           return `human: ${msg.content}`;
         }
         return '';
-      }).join(' | ');
-    }
-    if(data.chat){
-      let prevData = [];
-      if(data.caller_number && data.ai_number){
-         prevData = await getPreviousLogData(data.caller_number, data.ai_number)
-      }
-      let chatData  = data.chat
-      if(prevData && prevData.structuredOutputData && JSON.parse(prevData.structuredOutputData).detailedSummary){
-        chatData = "Here is the current user's conversation: \n" + chatData + "\n here is the summary of the user's previous conversations: \n" +JSON.parse(prevData.structuredOutputData).detailedSummary;
-      }
-      let campDetails = null
-      if(data.campId){
-       campDetails = await getPlivoCampaignDetails(data.campId)
-      }
-      const structuredData =  await getQualifiedLeadType(chatData, prompt, campDetails)
-      data.structuredOutputData = structuredData
+      }).filter(s => s).join(' | ');
     }
 
+    // lead_analysis is already computed by unipipe (via Gemini) and included in data
     data.caller = data.caller_number
     data.exophone = data.ai_number
-    // Perform MongoDB operations here using the client object
     const database = client.db("talkGlimpass");
     const collection = database.collection("logData");
     const result = await collection.insertOne(data);
-    
+
     if (result.insertedId) {
       return { status: 200, message: 'Log saved successfully' };
     } else {
@@ -1369,8 +1279,6 @@ async function saveLogData(data) {
   } catch (error) {
     console.error("Error running MongoDB queries:", error);
     return { status: 500, message: "Error saving log data." };
-  } finally {
-    // await closeMongoConnection();
   }
 }
 
@@ -1502,10 +1410,13 @@ async function getLogData(from, to){
       initialCallData.name = initialCallData.first_name
       return initialCallData
     }
-    let finalLogData = JSON.parse(logData[0].structuredOutputData)
-    finalLogData.lead_analysis = logData[0].lead_analysis
-    finalLogData.summary = logData[0].summary
-    // Return the retrieved log data
+    const record = logData[0];
+    const finalLogData = {
+      lead_analysis: record.lead_analysis || {},
+      summary: record.summary,
+      chat: record.chat,
+      name: (record.lead_analysis && record.lead_analysis.name) || record.name || '',
+    };
     return finalLogData
   } catch (error) {
     console.error("Error retrieving log data:", error);

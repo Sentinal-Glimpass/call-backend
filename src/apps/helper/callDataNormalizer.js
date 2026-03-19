@@ -151,7 +151,6 @@ function normalizeBotCallback(botData) {
     chat,
     lead_analysis,
     summary,
-    structuredOutputData,
     conversation_time
   } = botData;
 
@@ -164,11 +163,14 @@ function normalizeBotCallback(botData) {
     normalized.messages = messages;
   }
 
-  // Lead analysis
+  // Lead analysis (computed by unipipe via Gemini)
   if (lead_analysis && typeof lead_analysis === 'object') {
     normalized.leadAnalysis = {
       isLead: lead_analysis.is_lead === 'true' || lead_analysis.is_lead === true,
+      leadCategory: lead_analysis.lead_category || '',
       reason: lead_analysis.reason || '',
+      name: lead_analysis.name || '',
+      email: lead_analysis.email || '',
       nextAction: lead_analysis.next_action || ''
     };
   }
@@ -176,28 +178,6 @@ function normalizeBotCallback(botData) {
   // Call summary
   if (summary && summary !== 'summary') {
     normalized.callSummary = summary;
-  }
-
-  // Structured output (parse if string)
-  if (structuredOutputData) {
-    try {
-      const parsed = typeof structuredOutputData === 'string'
-        ? JSON.parse(structuredOutputData)
-        : structuredOutputData;
-
-      normalized.structuredAnalysis = {
-        hotLead: parsed.hotLead || 0,
-        warmLead: parsed.warmLead || 0,
-        coldLead: parsed.coldLead || 0,
-        explanation: parsed.explanation || '',
-        detailedSummary: parsed.detailedSummary || '',
-        problem: parsed.problem || '',
-        name: parsed.name || ''
-      };
-    } catch (e) {
-      // Keep as string if parsing fails
-      normalized.structuredAnalysis = structuredOutputData;
-    }
   }
 
   // Conversation duration from bot
@@ -306,12 +286,9 @@ function createApiResponse(callData, logData = {}) {
     response.callSummary = summary;
   }
 
-  // Structured analysis
-  const structuredAnalysis = callData.structuredAnalysis || callData.structuredOutputData;
-  if (structuredAnalysis) {
-    response.structuredAnalysis = typeof structuredAnalysis === 'string'
-      ? JSON.parse(structuredAnalysis)
-      : structuredAnalysis;
+  // Lead category from lead analysis (computed by unipipe)
+  if (response.leadAnalysis && response.leadAnalysis.leadCategory) {
+    response.leadCategory = response.leadAnalysis.leadCategory;
   }
 
   // Contact info

@@ -550,7 +550,9 @@ router.get('/incoming-applet-call-back', async (req, res) => {
         const logData = await getLogDataByCallSid(callSid);
         console.log(logData);
 
-        if (logData && logData.structuredOutputData && logData.structuredOutputData.coldLead == 0) {
+        const isLead = logData && logData.lead_analysis &&
+            (logData.lead_analysis.is_lead === 'true' || logData.lead_analysis.is_lead === true);
+        if (isLead) {
             console.log('message will be send')
             sendWATITemplateMessage(ph_no);
         }
