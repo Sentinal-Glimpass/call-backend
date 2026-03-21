@@ -43,6 +43,8 @@
     "nodemailer": "^7.0.6",
     "openai": "^4.0.0",
     "pdfkit": "^0.15.0",
+    "pino": "^10.3.1",
+    "pino-http": "^11.0.0",
     "plivo": "^4.69.3",
     "razorpay": "^2.9.6",
     "redis": "^4.7.1",
@@ -57,6 +59,7 @@
     "@babel/core": "^7.22.11",
     "@babel/node": "^7.22.10",
     "@babel/preset-env": "^7.22.10",
-    "nodemon": "^3.0.1"
+    "nodemon": "^3.0.1",
+    "pino-pretty": "^13.1.3"
   }
 }

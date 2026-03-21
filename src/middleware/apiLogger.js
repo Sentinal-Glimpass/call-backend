@@ -1,271 +1,114 @@
-const fs = require('fs').promises;
-const path = require('path');
+const pinoHttp = require('pino-http');
+const crypto = require('crypto');
+const logger = require('../utils/logger');
 
-// Enhanced API request/response logger
-const apiLogger = (req, res, next) => {
-  const startTime = Date.now();
-  const timestamp = new Date().toISOString();
-  
-  // Capture the original response methods
-  const originalSend = res.send;
-  const originalJson = res.json;
-  
-  let responseData = null;
-  let statusCode = 200;
-  
-  // Override res.send to capture response data
-  res.send = function(body) {
-    responseData = body;
-    statusCode = res.statusCode || 200;
-    return originalSend.call(this, body);
-  };
-  
-  // Override res.json to capture JSON response data
-  res.json = function(body) {
-    responseData = body;
-    statusCode = res.statusCode || 200;
-    return originalJson.call(this, body);
-  };
-  
-  // When response finishes, log the complete request/response
-  res.on('finish', async () => {
-    const endTime = Date.now();
-    const duration = endTime - startTime;
-    
-    // Sanitize sensitive data for logging
-    const sanitizedBody = sanitizeRequestBody(req.body, req.path);
-    const sanitizedResponse = sanitizeResponseData(responseData, req.path);
-    
-    const logEntry = {
-      timestamp,
-      ip: req.ip || req.connection.remoteAddress,
-      userAgent: req.get('User-Agent') || 'Unknown',
-      method: req.method,
-      path: req.path,
-      url: req.originalUrl,
-      statusCode,
-      duration: `${duration}ms`,
-      request: {
-        headers: sanitizeHeaders(req.headers),
-        query: req.query,
-        body: sanitizedBody,
-        params: req.params
-      },
-      response: {
-        data: sanitizedResponse,
-        headers: sanitizeHeaders(res.getHeaders())
-      },
-      user: req.user ? {
-        clientId: req.user.clientId,
-        email: req.user.email,
-        company: req.user.company,
-        tokens: req.user.tokens
-      } : null,
-      auth: {
-        hasToken: !!req.headers.authorization,
-        tokenType: req.headers.authorization ? req.headers.authorization.split(' ')[0] : null
-      },
-      performance: {
-        durationMs: duration,
-        category: categorizeDuration(duration)
-      }
-    };
-    
-    // Log to console with formatted output
-    logToConsole(logEntry);
-    
-    // Also log to file for persistence (optional)
-    logToFile(logEntry).catch(err => {
-      console.error('Failed to log to file:', err.message);
-    });
-  });
-  
-  next();
-};
+// Paths to skip logging entirely (health checks, probes)
+const SKIP_PATHS = new Set([
+  '/health', '/health/liveness', '/health/readiness',
+  '/health/container', '/health/detailed', '/health/cloud-run',
+  '/health/heartbeats', '/health/concurrency', '/health/comprehensive',
+  '/health/database', '/health/database/validate', '/health/performance',
+  '/health/integration-test',
+  '/', '/warmup', '/favicon.ico'
+]);
 
-// Sanitize request body to remove sensitive data
-function sanitizeRequestBody(body, path) {
+// High-volume webhook paths — sampled to reduce volume
+const SAMPLED_PATHS = new Set([
+  '/plivo/callback-url', '/plivo/ring-url', '/plivo/hangup-url',
+  '/plivo/callback-record-url',
+  '/twilio/callback-url', '/twilio/status-callback',
+  '/exotel/callback-url'
+]);
+
+const SAMPLE_RATE = parseFloat(process.env.LOG_SAMPLE_RATE) || 0.1;
+
+function shouldLog(req) {
+  const path = req.url.split('?')[0];
+  if (SKIP_PATHS.has(path)) return false;
+  if (SAMPLED_PATHS.has(path)) return Math.random() < SAMPLE_RATE;
+  return true;
+}
+
+function sanitizeBody(body) {
   if (!body || typeof body !== 'object') return body;
-  
   const sanitized = { ...body };
-  
-  // Remove passwords from all requests
-  if (sanitized.password) {
-    sanitized.password = '[REDACTED]';
+  for (const key of ['password', 'apiKey', 'token', 'secret']) {
+    if (sanitized[key]) sanitized[key] = '[REDACTED]';
   }
-  
-  // Remove API keys
-  if (sanitized.apiKey) {
-    sanitized.apiKey = '[REDACTED]';
-  }
-  
-  // Remove sensitive tokens
-  if (sanitized.token && typeof sanitized.token === 'string') {
-    sanitized.token = `[REDACTED-${sanitized.token.length} chars]`;
-  }
-  
-  return sanitized;
-}
-
-// Sanitize response data
-function sanitizeResponseData(data, path) {
-  if (!data || typeof data !== 'object') return data;
-  
-  let sanitized;
-  try {
-    sanitized = typeof data === 'string' ? JSON.parse(data) : { ...data };
-  } catch {
-    return data; // Return as-is if not JSON
-  }
-  
-  // Redact JWT tokens in responses
-  if (sanitized.token && typeof sanitized.token === 'string') {
-    sanitized.token = `[JWT-${sanitized.token.length} chars]`;
-  }
-  
-  // Redact API keys in user objects
   if (sanitized.user && sanitized.user.apiKey) {
-    sanitized.user.apiKey = '[REDACTED]';
+    sanitized.user = { ...sanitized.user, apiKey: '[REDACTED]' };
   }
-  
   return sanitized;
 }
 
-// Sanitize headers
-function sanitizeHeaders(headers) {
-  if (!headers) return {};
-  
-  const sanitized = { ...headers };
-  
-  // Redact authorization headers
-  if (sanitized.authorization) {
-    const parts = sanitized.authorization.split(' ');
-    if (parts.length === 2) {
-      sanitized.authorization = `${parts[0]} [REDACTED-${parts[1].length} chars]`;
+const apiLogger = pinoHttp({
+  logger: logger,
+
+  // Request ID from Cloud Run trace header or random UUID
+  genReqId: (req) => {
+    return req.headers['x-request-id'] ||
+      req.headers['x-cloud-trace-context']?.split('/')[0] ||
+      crypto.randomUUID();
+  },
+
+  // Skip health checks and sample webhooks
+  autoLogging: {
+    ignore: (req) => !shouldLog(req)
+  },
+
+  customSuccessMessage: (req, res) => {
+    return `${req.method} ${req.url} ${res.statusCode}`;
+  },
+
+  customErrorMessage: (req, res, err) => {
+    return `${req.method} ${req.url} ${res.statusCode} - ${err.message}`;
+  },
+
+  // Minimal request/response serialization
+  serializers: {
+    req: (req) => ({
+      method: req.method,
+      url: req.url,
+    }),
+    res: (res) => ({
+      statusCode: res.statusCode,
+    }),
+  },
+
+  // Add context — include body only on errors
+  customProps: (req, res) => {
+    const props = {
+      userId: req.user?.clientId || null,
+      userEmail: req.user?.email || null,
+      ip: req.ip || req.connection?.remoteAddress,
+    };
+
+    // On 4xx/5xx errors, include request body for debugging
+    if (res.statusCode >= 400) {
+      props.requestBody = sanitizeBody(req.body);
     }
+
+    return props;
+  },
+
+  customAttributeKeys: {
+    reqId: 'requestId'
   }
-  
-  // Remove cookie headers for privacy
-  if (sanitized.cookie) {
-    sanitized.cookie = '[REDACTED]';
-  }
-  
-  return sanitized;
-}
+});
 
-// Categorize response duration
-function categorizeDuration(duration) {
-  if (duration < 100) return 'FAST';
-  if (duration < 500) return 'NORMAL';
-  if (duration < 2000) return 'SLOW';
-  return 'VERY_SLOW';
-}
-
-// Format and log to console
-function logToConsole(logEntry) {
-  const { timestamp, method, path, statusCode, duration, user, ip } = logEntry;
-
-  // Color coding for status codes
-  const statusColor = getStatusColor(statusCode);
-  const durationColor = getDurationColor(logEntry.performance.category);
-
-  // Check if this is an MCP endpoint - use compact logging
-  if (path.includes('/mcp/')) {
-    // Compact one-line format for MCP endpoints
-    const mcpMethod = logEntry.request.body?.method || 'unknown';
-    console.log(`🔌 MCP ${method} ${path} [${mcpMethod}] → ${statusCode} (${duration})`);
-
-    // Only log errors in detail for MCP
-    if (statusCode >= 400 || logEntry.performance.category === 'SLOW' || logEntry.performance.category === 'VERY_SLOW') {
-      console.log(`   ⚠️ Error/Slow: ${JSON.stringify(logEntry.response.data)}`);
-    }
-    return;
-  }
-
-  // Full detailed logging for non-MCP endpoints
-  console.log('\n' + '='.repeat(80));
-  console.log(`🕐 ${timestamp}`);
-  console.log(`🌐 ${method} ${path} → ${statusColor}${statusCode}\x1b[0m (${durationColor}${duration}\x1b[0m)`);
-  console.log(`📍 IP: ${ip} | User: ${user ? `${user.email} (${user.tokens} tokens)` : 'Anonymous'}`);
-
-  // Request details
-  if (Object.keys(logEntry.request.query).length > 0) {
-    console.log(`📝 Query: ${JSON.stringify(logEntry.request.query)}`);
-  }
-
-  if (logEntry.request.body && Object.keys(logEntry.request.body).length > 0) {
-    console.log(`📦 Request Body: ${JSON.stringify(logEntry.request.body, null, 2)}`);
-  }
-
-  // Response details (truncated for readability)
-  if (logEntry.response.data) {
-    const responseStr = JSON.stringify(logEntry.response.data, null, 2);
-    const truncated = responseStr.length > 500 ? responseStr.substring(0, 500) + '...' : responseStr;
-    console.log(`📤 Response: ${truncated}`);
-  }
-
-  // Performance and auth info
-  console.log(`🔐 Auth: ${logEntry.auth.hasToken ? `✅ ${logEntry.auth.tokenType}` : '❌ No token'}`);
-  console.log(`⚡ Performance: ${logEntry.performance.category} (${duration})`);
-  console.log('='.repeat(80));
-}
-
-// Get color for status code
-function getStatusColor(statusCode) {
-  if (statusCode >= 200 && statusCode < 300) return '\x1b[32m'; // Green
-  if (statusCode >= 300 && statusCode < 400) return '\x1b[33m'; // Yellow
-  if (statusCode >= 400 && statusCode < 500) return '\x1b[31m'; // Red
-  if (statusCode >= 500) return '\x1b[35m'; // Magenta
-  return '\x1b[0m'; // Reset
-}
-
-// Get color for duration
-function getDurationColor(category) {
-  switch (category) {
-    case 'FAST': return '\x1b[32m'; // Green
-    case 'NORMAL': return '\x1b[33m'; // Yellow
-    case 'SLOW': return '\x1b[31m'; // Red
-    case 'VERY_SLOW': return '\x1b[35m'; // Magenta
-    default: return '\x1b[0m'; // Reset
-  }
-}
-
-// Log to file for persistence
-async function logToFile(logEntry) {
-  try {
-    const logDir = path.join(__dirname, '../../logs');
-    await fs.mkdir(logDir, { recursive: true });
-    
-    const date = new Date().toISOString().split('T')[0];
-    const logFile = path.join(logDir, `api-${date}.log`);
-    
-    const logLine = JSON.stringify(logEntry) + '\n';
-    await fs.appendFile(logFile, logLine);
-  } catch (error) {
-    // Don't throw - logging should never break the app
-    console.error('File logging error:', error.message);
-  }
-}
-
-// Request counter and rate monitoring
+// Lightweight request counter
 let requestCount = 0;
 let lastResetTime = Date.now();
 
 const requestCounter = (req, res, next) => {
   requestCount++;
-  
-  // Reset counter every hour
   const now = Date.now();
-  if (now - lastResetTime > 3600000) { // 1 hour
-    console.log(`📊 Hourly Stats: ${requestCount} requests processed`);
+  if (now - lastResetTime > 3600000) {
+    logger.info({ hourlyRequestCount: requestCount }, 'Hourly request stats');
     requestCount = 0;
     lastResetTime = now;
   }
-  
   next();
 };
 
-module.exports = {
-  apiLogger,
-  requestCounter
-};
+module.exports = { apiLogger, requestCounter };

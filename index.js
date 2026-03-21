@@ -1,3 +1,5 @@
+// Console override MUST be first — routes console.log/error/warn through pino
+require('./src/utils/consoleOverride');
 
 // const arangojs = require('arangojs'); // REMOVED: Legacy ArangoDB support deprecated
 const express = require('express');
@@ -117,21 +119,12 @@ const corsOptions = {
 
 app.use(cors(corsOptions));
 
-// Debug middleware for MCP endpoints (non-consuming)
+// Fix duplicate content-type headers for MCP endpoints
 app.use('/mcp', (req, res, next) => {
-  console.log(`🔬 [DEBUG] ${req.method} ${req.path}`);
-  console.log(`🔬 [DEBUG] Content-Length: ${req.headers['content-length']}`);
-  console.log(`🔬 [DEBUG] Content-Type: ${req.headers['content-type']}`);
-
-  // Check for duplicate content-type headers
   const contentType = req.headers['content-type'];
   if (contentType && contentType.includes(',')) {
-    console.log(`⚠️ [DEBUG] DUPLICATE Content-Type detected: ${contentType}`);
-    // Fix the duplicate content-type header
     req.headers['content-type'] = 'application/json';
-    console.log(`✅ [DEBUG] Fixed Content-Type to: ${req.headers['content-type']}`);
   }
-
   next();
 });
 
@@ -173,15 +166,7 @@ app.use((req, res, next) => {
 app.use(apiLogger);
 app.use(requestCounter);
 
-app.use((req, res, next) => {
-    const forwardedFor = req.headers['x-forwarded-for'];
-    const clientIp = forwardedFor
-        ? forwardedFor.split(',')[0] // First IP in case of multiple proxies
-        : req.connection.remoteAddress;
-
-    console.log(`Client IP: ${clientIp}`);
-    next();
-});
+// Client IP logging removed — captured by pino-http request log
 
 // Apply rate limiting to all API routes - REMOVED
 // app.use(apiLimiter);
