@@ -223,8 +223,8 @@ async function insertUsers(userDataArray, isUpdate) {
       const database = client.db("talkGlimpass");
       const collection = database.collection("client");
   
-      // Find client and validate credentials
-      const clientData = await collection.findOne({ email, password });
+      // Find client and validate credentials (case-insensitive email)
+      const clientData = await collection.findOne({ email: { $regex: new RegExp(`^${email.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`, 'i') }, password });
       
       if (clientData) {
         // Initialize tokens if not present (for existing users)
