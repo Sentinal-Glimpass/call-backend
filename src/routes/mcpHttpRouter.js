@@ -7,11 +7,13 @@ const { authenticateSuperKey, auditLog } = require('../middleware/authMiddleware
 // Import MCP server classes
 const { WATIMCPServer } = require('../../mcp_servers/wati/server');
 const { GmailMCPServer } = require('../../mcp_servers/gmail/server');
+const { ScheduleCallMCPServer } = require('../../mcp_servers/schedule-call/server');
 
 // Import services to get agent tool assignments
 const { getAgentWatiTools } = require('../services/tools/watiService');
 const { getAgentEmailTools } = require('../services/tools/emailService');
 const { getAgentMcpTools } = require('../services/tools/mcpService');
+const { getAgentScheduleCallTools } = require('../services/tools/scheduleCallService');
 
 /**
  * @swagger
@@ -218,6 +220,52 @@ router.post('/gmail/:agentId', authenticateSuperKey, auditLog, async (req, res) 
 });
 
 // =============================================================================
+// SCHEDULE CALL MCP HTTP ENDPOINT
+// =============================================================================
+
+router.post('/schedule-call/:agentId', authenticateSuperKey, auditLog, async (req, res) => {
+  try {
+    const { agentId } = req.params;
+    let mcpRequest = req.body;
+
+    if (typeof mcpRequest === 'string') {
+      try {
+        mcpRequest = JSON.parse(mcpRequest);
+      } catch (parseError) {
+        return res.status(400).json({ error: 'Invalid JSON in request body', code: -32700 });
+      }
+    }
+
+    if (!mcpRequest || typeof mcpRequest !== 'object') {
+      return res.status(400).json({ error: 'Request body must be a valid JSON object', code: -32700 });
+    }
+
+    console.log(`🔌 Schedule Call MCP: ${mcpRequest.method} → agent:${agentId}`);
+
+    const agentTools = await getAgentScheduleCallTools(agentId);
+
+    if (!agentTools.success || !agentTools.data.assigned_tools?.length) {
+      return res.status(404).json({ error: 'No schedule call tools assigned to agent', code: -32601 });
+    }
+
+    const scheduleCallServer = new ScheduleCallMCPServer();
+    await scheduleCallServer.setAgentContext(agentId, agentTools.data.client_id);
+
+    const response = await scheduleCallServer.handleHttpRequest(mcpRequest);
+
+    if (response === undefined || response === null) {
+      return res.status(200).end();
+    }
+
+    res.json(response);
+
+  } catch (error) {
+    console.error('❌ Schedule Call MCP HTTP handler error:', error.message);
+    res.status(500).json({ error: 'Internal server error', message: error.message, code: -32603 });
+  }
+});
+
+// =============================================================================
 // GENERIC MCP PROXY ENDPOINT
 // =============================================================================
 
@@ -356,10 +404,11 @@ router.get('/discover/:agentId', authenticateSuperKey, auditLog, async (req, res
     console.log(`🔍 MCP server discovery for agent: ${agentId}`);
 
     // Get all tool assignments for the agent
-    const [watiTools, emailTools, mcpTools] = await Promise.all([
+    const [watiTools, emailTools, mcpTools, scheduleCallTools] = await Promise.all([
       getAgentWatiTools(agentId),
       getAgentEmailTools(agentId),
-      getAgentMcpTools(agentId)
+      getAgentMcpTools(agentId),
+      getAgentScheduleCallTools(agentId)
     ]);
 
     const servers = [];
@@ -381,6 +430,16 @@ router.get('/discover/:agentId', authenticateSuperKey, auditLog, async (req, res
         url: `/mcp/gmail/${agentId}`,
         tools_count: emailTools.data.assigned_tools.filter(t => t.enabled).length,
         description: 'Gmail/SMTP email tools'
+      });
+    }
+
+    // Schedule Call servers
+    if (scheduleCallTools.success && scheduleCallTools.data.assigned_tools?.length > 0) {
+      servers.push({
+        type: 'schedule_call',
+        url: `/mcp/schedule-call/${agentId}`,
+        tools_count: scheduleCallTools.data.assigned_tools.filter(t => t.enabled).length,
+        description: 'Schedule follow-up call tools'
       });
     }
 

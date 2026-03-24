@@ -3585,21 +3585,6 @@ router.get('/check-scheduled-campaigns', async(req, res) => {
       // Continue with empty array - don't fail the entire endpoint
     }
 
-    if (scheduledCampaigns.length === 0 && (recoveryResult.recovered || 0) === 0) {
-      return res.status(200).json({
-        success: true,
-        orphanedRecovery: {
-          recovered: recoveryResult.recovered || 0,
-          failed: recoveryResult.failed || 0,
-          total: recoveryResult.total || 0
-        },
-        message: 'No scheduled campaigns due to start',
-        started: [],
-        skipped: 0,
-        timestamp: now.toISOString()
-      });
-    }
-
     const started = [];
     const errors = [];
 
@@ -3725,14 +3710,100 @@ router.get('/check-scheduled-campaigns', async(req, res) => {
       }
     }
 
+    // STEP 3: Process pending scheduled calls (from Schedule Call MCP tool)
+    const scheduledCallsResult = { executed: 0, failed: 0 };
+    try {
+      const glimpassDb = client.db('glimpass');
+      const pendingCalls = await glimpassDb.collection('scheduledCalls')
+        .find({ status: 'pending', executeAt: { $lte: now } })
+        .sort({ executeAt: 1 })
+        .limit(20)
+        .toArray();
+
+      if (pendingCalls.length > 0) {
+        console.log(`📞 Found ${pendingCalls.length} pending scheduled calls to execute`);
+        const { processSingleCall } = require('../apps/helper/activeCalls.js');
+        const { getAssistantDetails } = require('../apps/interLogue/client.js');
+
+        for (const scheduledCall of pendingCalls) {
+          try {
+            // Mark as executing to prevent duplicate processing
+            await glimpassDb.collection('scheduledCalls').updateOne(
+              { _id: scheduledCall._id, status: 'pending' },
+              { $set: { status: 'executing', updatedAt: new Date() } }
+            );
+
+            const assistantData = await getAssistantDetails(scheduledCall.targetAgentId);
+            if (!assistantData) {
+              throw new Error(`Assistant not found: ${scheduledCall.targetAgentId}`);
+            }
+
+            const finalWssUrl = `wss://socket.glimpass.com/chat/v2/${scheduledCall.targetAgentId}`;
+
+            const callResult = await processSingleCall({
+              clientId: scheduledCall.clientId,
+              campaignId: 'scheduled-call',
+              from: scheduledCall.fromNumber,
+              to: scheduledCall.toNumber,
+              wssUrl: finalWssUrl,
+              firstName: '',
+              email: '',
+              tag: scheduledCall.targetAgentId,
+              listId: 'scheduled-call',
+              provider: null,
+              contactIndex: 0,
+              sequenceNumber: 1,
+              contactData: {
+                number: scheduledCall.toNumber,
+                assistantId: scheduledCall.targetAgentId,
+                wssUrl: finalWssUrl,
+                scheduledCallContext: scheduledCall.context || ''
+              },
+              dynamicFields: {
+                number: scheduledCall.toNumber,
+                assistantId: scheduledCall.targetAgentId,
+                wssUrl: finalWssUrl,
+                scheduledCallContext: scheduledCall.context || ''
+              },
+              callSource: 'scheduled-call'
+            });
+
+            const newStatus = callResult.success ? 'executed' : 'failed';
+            await glimpassDb.collection('scheduledCalls').updateOne(
+              { _id: scheduledCall._id },
+              { $set: { status: newStatus, callUUID: callResult.callUUID || null, updatedAt: new Date() } }
+            );
+
+            if (callResult.success) {
+              scheduledCallsResult.executed++;
+              console.log(`✅ Scheduled call executed: ${scheduledCall.toNumber} (${callResult.callUUID})`);
+            } else {
+              scheduledCallsResult.failed++;
+              console.error(`❌ Scheduled call failed: ${scheduledCall.toNumber} - ${callResult.error}`);
+            }
+          } catch (callError) {
+            scheduledCallsResult.failed++;
+            await glimpassDb.collection('scheduledCalls').updateOne(
+              { _id: scheduledCall._id },
+              { $set: { status: 'failed', error: callError.message, updatedAt: new Date() } }
+            ).catch(() => {});
+            console.error(`❌ Scheduled call error for ${scheduledCall.toNumber}:`, callError.message);
+          }
+        }
+        console.log(`📞 Scheduled calls: ${scheduledCallsResult.executed} executed, ${scheduledCallsResult.failed} failed`);
+      }
+    } catch (scheduledCallError) {
+      console.error('❌ Error processing scheduled calls:', scheduledCallError.message);
+    }
+
     const totalRecovered = recoveryResult.recovered || 0;
     const totalStarted = started.length;
-    const totalOperations = totalRecovered + totalStarted;
+    const totalOperations = totalRecovered + totalStarted + scheduledCallsResult.executed;
 
     const response = {
       success: true,
       message: totalOperations > 0
-        ? `Recovered ${totalRecovered} orphaned, started ${totalStarted} scheduled campaign(s)`
+        ? `Recovered ${totalRecovered} orphaned, started ${totalStarted} scheduled campaign(s), executed ${scheduledCallsResult.executed} scheduled call(s)`
         : 'No orphaned or scheduled campaigns to process',
       orphanedRecovery: {
         recovered: recoveryResult.recovered || 0,
@@ -3741,10 +3812,11 @@ router.get('/check-scheduled-campaigns', async(req, res) => {
       },
       scheduledStart: {
         started: started,
-        skipped: 0, // We limit via query, so no skipped
+        skipped: 0,
         errors: errors.length > 0 ? errors : undefined,
         maxCampaigns: maxCampaigns
       },
+      scheduledCalls: scheduledCallsResult,
       timestamp: now.toISOString()
     };
 
@@ -3753,8 +3825,9 @@ router.get('/check-scheduled-campaigns', async(req, res) => {
     console.log(`📊 CAMPAIGN CHECK SUMMARY:`);
     console.log(`   🔄 Orphaned Recovery: ${totalRecovered} recovered, ${recoveryResult.failed || 0} failed (${recoveryResult.total || 0} total)`);
     console.log(`   📅 Scheduled Start: ${totalStarted} started, ${errors.length} failed`);
-    console.log(`   ✅ Total Success: ${totalRecovered + totalStarted}`);
-    console.log(`   ❌ Total Failures: ${(recoveryResult.failed || 0) + errors.length}`);
+    console.log(`   📞 Scheduled Calls: ${scheduledCallsResult.executed} executed, ${scheduledCallsResult.failed} failed`);
+    console.log(`   ✅ Total Success: ${totalRecovered + totalStarted + scheduledCallsResult.executed}`);
+    console.log(`   ❌ Total Failures: ${(recoveryResult.failed || 0) + errors.length + scheduledCallsResult.failed}`);
 
     if (recoveryResult.error) {
       console.error(`   ⚠️  Orphan recovery error: ${recoveryResult.error}`);

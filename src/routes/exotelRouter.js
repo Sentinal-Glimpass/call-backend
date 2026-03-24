@@ -759,6 +759,23 @@ router.post('/save-log-data', async(req,res)=>{
 
              if (mergeResult.modifiedCount > 0) {
                console.log(`✅ Bot conversation data merged with hangup record: ${data.callUUID}`);
+
+               // Fire post-call actions (fire-and-forget)
+               try {
+                 const mergedDoc = await hangupCollection.findOne(query);
+                 if (mergedDoc) {
+                   // Determine assistantId from the call data
+                   const assistantId = mergedDoc.assistantId || data.assistantId || mergedDoc.tag;
+                   if (assistantId) {
+                     const { runPostCallActions } = require('../services/postCallActionRunner');
+                     runPostCallActions(mergedDoc, assistantId).catch(err =>
+                       console.error(`❌ Post-call actions error:`, err.message)
+                     );
+                   }
+                 }
+               } catch (postCallErr) {
+                 console.error(`❌ Failed to trigger post-call actions:`, postCallErr.message);
+               }
              }
            }
          } catch (mergeError) {

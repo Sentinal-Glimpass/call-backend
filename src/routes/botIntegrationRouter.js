@@ -8,6 +8,7 @@ const { authenticateSuperKey, auditLog } = require('../middleware/authMiddleware
 const { getWatiConfigForBot } = require('../services/tools/watiService');
 const { getEmailConfigForBot } = require('../services/tools/emailService');
 const { getMcpConfigForBot } = require('../services/tools/mcpService');
+const { getScheduleCallConfigForBot } = require('../services/tools/scheduleCallService');
 
 /**
  * @swagger
@@ -67,10 +68,11 @@ router.get('/:agentId/mcp-config', authenticateSuperKey, auditLog, async (req, r
     const { agentId } = req.params;
 
     // Get all tool configurations in parallel
-    const [watiResult, emailResult, mcpResult] = await Promise.all([
+    const [watiResult, emailResult, mcpResult, scheduleCallResult] = await Promise.all([
       getWatiConfigForBot(agentId),
       getEmailConfigForBot(agentId),
-      getMcpConfigForBot(agentId)
+      getMcpConfigForBot(agentId),
+      getScheduleCallConfigForBot(agentId)
     ]);
 
     const mcpServers = [];
@@ -117,6 +119,25 @@ router.get('/:agentId/mcp-config', authenticateSuperKey, auditLog, async (req, r
       };
 
       mcpServers.push(gmailServer);
+    }
+
+    // Process Schedule Call tools
+    if (scheduleCallResult.success && scheduleCallResult.schedule_call_tools?.length > 0) {
+      clientId = clientId || scheduleCallResult.client_id;
+
+      const scheduleCallServer = {
+        name: 'schedule-call-internal-server',
+        mcp_config: scheduleCallResult.schedule_call_tools[0].mcp_config,
+        tool_type: 'schedule_call',
+        tools: scheduleCallResult.schedule_call_tools.map(tool => ({
+          tool_id: tool.schedule_call_tool_id,
+          tool_name: tool.tool_name,
+          mcp_identifier: tool.mcp_identifier,
+          strategy: tool.strategy
+        }))
+      };
+
+      mcpServers.push(scheduleCallServer);
     }
 
     // Process Generic MCP tools
@@ -195,10 +216,11 @@ router.get('/:agentId/tools-summary', authenticateSuperKey, auditLog, async (req
     const { agentId } = req.params;
 
     // Get all tool configurations in parallel
-    const [watiResult, emailResult, mcpResult] = await Promise.all([
+    const [watiResult, emailResult, mcpResult, scheduleCallResult] = await Promise.all([
       getWatiConfigForBot(agentId),
       getEmailConfigForBot(agentId),
-      getMcpConfigForBot(agentId)
+      getMcpConfigForBot(agentId),
+      getScheduleCallConfigForBot(agentId)
     ]);
 
     const summary = {
@@ -222,6 +244,15 @@ router.get('/:agentId/tools-summary', authenticateSuperKey, auditLog, async (req
             strategy: t.strategy
           })) || []
         },
+        schedule_call: {
+          enabled: scheduleCallResult.success,
+          count: scheduleCallResult.schedule_call_tools?.length || 0,
+          tools: scheduleCallResult.schedule_call_tools?.map(t => ({
+            id: t.schedule_call_tool_id,
+            name: t.tool_name,
+            strategy: t.strategy
+          })) || []
+        },
         generic_mcp: {
           enabled: mcpResult.success,
           count: mcpResult.mcp_tools?.length || 0,
@@ -234,6 +265,7 @@ router.get('/:agentId/tools-summary', authenticateSuperKey, auditLog, async (req
       },
       total_tools: (watiResult.wati_tools?.length || 0) +
                    (emailResult.email_tools?.length || 0) +
+                   (scheduleCallResult.schedule_call_tools?.length || 0) +
                    (mcpResult.mcp_tools?.length || 0)
     };
 

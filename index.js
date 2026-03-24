@@ -42,6 +42,7 @@ const toolsRouter = require('./src/routes/toolsRouter');
 const watiRouter = require('./src/routes/tools/watiRouter');
 const emailRouter = require('./src/routes/tools/emailRouter');
 const mcpRouter = require('./src/routes/tools/mcpRouter');
+const scheduleCallRouter = require('./src/routes/tools/scheduleCallRouter');
 const botIntegrationRouter = require('./src/routes/botIntegrationRouter');
 const mcpHttpRouter = require('./src/routes/mcpHttpRouter');
 const flowsRouter = require('./src/routes/flowsRouter');
@@ -257,6 +258,7 @@ app.use('/api/tools', toolsRouter);
 app.use('/api/tools/wati', watiRouter); // New WATI tool endpoints
 app.use('/api/tools/gmail', emailRouter); // New Gmail tool endpoints
 app.use('/api/tools/mcp', mcpRouter); // New MCP tool endpoints
+app.use('/api/tools/schedule-call', scheduleCallRouter); // Schedule Call tool endpoints
 app.use('/api/bot-integration', botIntegrationRouter); // Unified bot integration API
 app.use('/mcp', mcpHttpRouter); // HTTP MCP server endpoints for cross-server communication
 app.use('/wati', toolsRouter); // Legacy direct mount for WATI endpoints
