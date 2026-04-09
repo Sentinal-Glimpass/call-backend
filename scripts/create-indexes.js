@@ -79,6 +79,27 @@ async function createPerformanceIndexes() {
       { background: true, name: "idx_campId_duration_id" }
     );
 
+    // Normalized-document indexes: hangup records saved via callDataNormalizer
+    // only set `campaignId` (not `campId`), so we need matching indexes or
+    // report queries fall back to COLLSCAN / miss docs under forced hints.
+    console.log('Creating index on plivoHangupData.campaignId...');
+    await database.collection("plivoHangupData").createIndex(
+      { campaignId: 1 },
+      { background: true, name: "idx_hangup_campaignId" }
+    );
+
+    console.log('Creating compound index on plivoHangupData.campaignId for pagination...');
+    await database.collection("plivoHangupData").createIndex(
+      { campaignId: 1, _id: -1 },
+      { background: true, name: "idx_hangup_campaignId_id_desc" }
+    );
+
+    console.log('Creating compound index on plivoHangupData.campaignId for filtered queries...');
+    await database.collection("plivoHangupData").createIndex(
+      { campaignId: 1, Duration: 1, _id: -1 },
+      { background: true, name: "idx_hangup_campaignId_duration_id" }
+    );
+
     console.log('Creating sparse index on plivoHangupData for common filter fields...');
     await database.collection("plivoHangupData").createIndex(
       { "leadAnalysis_is_lead": 1 },

@@ -557,13 +557,35 @@ async function getReportByCampId(campId, cursor = null, limit = 100, isDownload 
     }
   }
   
-  // If no hangup data found yet, return empty data with campaign status
+  // If the filtered query returned no docs, distinguish between:
+  //  (a) campaign has no completed calls yet (truly in progress), and
+  //  (b) campaign has completed calls but the applied filters matched none.
   if (reportData.status === 404) {
+    const finalStates = ['completed', 'cancelled', 'failed'];
+    const hasCompletedCalls = hangupDataCount > 0;
+    const campaignIsFinal = finalStates.includes(campaignStatus);
+    const hasActiveFilters = !!(
+      filters && (
+        (filters.duration && Object.keys(filters.duration).length > 0) ||
+        (Array.isArray(filters.customFilters) && filters.customFilters.length > 0) ||
+        (filters.custom && filters.custom.field && filters.custom.value)
+      )
+    );
+
+    let message;
+    if (hasActiveFilters && (hasCompletedCalls || campaignIsFinal)) {
+      message = "No calls match the applied filters";
+    } else if (campaignIsFinal) {
+      message = "Campaign finished with no completed calls";
+    } else {
+      message = "Campaign in progress - no completed calls yet";
+    }
+
     return {
       status: 200,
       data: [],
       totalDuration: 0,
-      message: "Campaign in progress - no completed calls yet",
+      message,
       campaignStatus: campaignStatus,
       completedCalls: hangupDataCount,
       totalScheduledCalls: totalScheduledCalls,
@@ -921,15 +943,15 @@ async function getMergedLogData(campId, cursor = null, limit = 100, isDownload =
     const queryLimit = isDownload ? 0 : limit + 1; // 0 means no limit in MongoDB
 
     // PERFORMANCE OPTIMIZATION: Fetch hangup data with better query planning
+    // NOTE: We intentionally do NOT hint a specific index here. The query uses
+    // $or: [{ campId }, { campaignId }] to support both legacy and normalized
+    // documents. Forcing the { campId: 1, _id: -1 } index caused normalized
+    // docs (which only have `campaignId`) to be excluded, producing empty
+    // filter results on completed campaigns. Let MongoDB's planner pick.
     let hangupQuery = hangupCollection
       .find(query)
       .sort({ _id: -1 });
-      
-    // Add query hints to use the right index
-    if (Object.keys(query).length > 1) {
-      hangupQuery = hangupQuery.hint({ campId: 1, _id: -1 });
-    }
-      
+
     if (queryLimit > 0) {
       hangupQuery = hangupQuery.limit(queryLimit);
     }
