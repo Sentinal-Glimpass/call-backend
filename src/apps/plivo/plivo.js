@@ -690,34 +690,71 @@ async function getMergedLogData(campId, cursor = null, limit = 100, isDownload =
     // Build query with cursor for pagination and filtering
     // Support both old 'campId' and new 'campaignId' field names
     const query = { $or: [{ campId }, { campaignId: campId }] };
-    
+
+    // Field aliases: legacy plivoHangupData docs used capitalized names
+    // (Duration, CallStatus, To, From, HangupCause, StartTime...) while
+    // normalized docs written by callDataNormalizer use lowercased names
+    // (duration, status, to, from, hangupCause, startTime...). Filter
+    // queries must consider both variants or they silently exclude all
+    // normalized records.
+    const FIELD_ALIASES = {
+      Duration: ['Duration', 'duration'],
+      duration: ['Duration', 'duration'],
+      CallStatus: ['CallStatus', 'status'],
+      status: ['CallStatus', 'status'],
+      HangupCause: ['HangupCause', 'hangupCause'],
+      hangupCause: ['HangupCause', 'hangupCause'],
+      To: ['To', 'to'],
+      to: ['To', 'to'],
+      From: ['From', 'from'],
+      from: ['From', 'from'],
+      StartTime: ['StartTime', 'startTime'],
+      startTime: ['StartTime', 'startTime'],
+      EndTime: ['EndTime', 'endTime'],
+      endTime: ['EndTime', 'endTime'],
+      AnswerTime: ['AnswerTime', 'answerTime'],
+      answerTime: ['AnswerTime', 'answerTime']
+    };
+    const getFieldAliases = (name) => FIELD_ALIASES[name] || [name];
+
     // Apply filters if provided
     if (filters) {
       console.log(`🔍 Applying filters to campaign ${campId}:`, filters);
-      
-      // Duration filtering - convert Duration field to integer for comparison
+
+      // Duration filtering - coalesce normalized `duration` (int) and legacy
+      // `Duration` (string) so the filter matches records from either schema.
       if (filters.duration) {
         const durationQuery = {};
-        
+
         if (filters.duration.min !== undefined) {
           durationQuery.$gte = parseInt(filters.duration.min);
         }
-        
+
         if (filters.duration.max !== undefined) {
           durationQuery.$lte = parseInt(filters.duration.max);
         }
-        
+
         if (filters.duration.equals !== undefined) {
           durationQuery.$eq = parseInt(filters.duration.equals);
         }
-        
+
         if (Object.keys(durationQuery).length > 0) {
-          // Convert Duration string to integer for comparison
+          // $convert with onError/onNull: 0 safely handles both the legacy
+          // string-typed `Duration` and the normalized int-typed `duration`.
+          const durationValueExpr = {
+            $convert: {
+              input: { $ifNull: ['$duration', { $ifNull: ['$Duration', 0] }] },
+              to: 'int',
+              onError: 0,
+              onNull: 0
+            }
+          };
+
           query.$expr = {
             $and: [
               ...(query.$expr?.$and || []),
               ...Object.entries(durationQuery).map(([operator, value]) => ({
-                [operator]: [{ $toInt: { $ifNull: ["$Duration", "0"] } }, value]
+                [operator]: [durationValueExpr, value]
               }))
             ]
           };
@@ -725,70 +762,72 @@ async function getMergedLogData(campId, cursor = null, limit = 100, isDownload =
         }
       }
       
+      // Build a condition that matches against all aliases of a field name.
+      // Positive ops (contains/equals) use $or — any alias matching is a hit.
+      // Negative ops (not_contains/not_equals) use $and — the value must be
+      // absent from every alias (a missing field trivially satisfies $not,
+      // so $and keeps the semantics intact for both legacy and normalized).
+      const buildAliasedCondition = (fieldName, matchExpr, isNegation) => {
+        const aliases = getFieldAliases(fieldName);
+        if (aliases.length === 1) {
+          return { [aliases[0]]: matchExpr };
+        }
+        const clauses = aliases.map((a) => ({ [a]: matchExpr }));
+        return isNegation ? { $and: clauses } : { $or: clauses };
+      };
+
       // Multiple custom filters support (array of custom filters)
       if (filters.customFilters && Array.isArray(filters.customFilters)) {
         console.log(`🔧 Processing ${filters.customFilters.length} custom filters`);
-        
+
         // Collect all custom filter conditions
         const customFilterConditions = [];
-        
+
         filters.customFilters.forEach((customFilter, index) => {
           if (!customFilter.field || !customFilter.value) {
             console.warn(`⚠️ Skipping invalid custom filter ${index}: missing field or value`);
             return;
           }
-          
-          let fieldName = customFilter.field;
+
+          const fieldName = customFilter.field;
           const searchValue = customFilter.value;
           const operator = customFilter.operator || 'contains'; // default to contains
-          
-          // Use field name as-is - no conversion needed
-          console.log(`🔧 Filter ${index}: Using field name as-is: ${fieldName}`);
-          
+          const aliases = getFieldAliases(fieldName);
+
+          console.log(`🔧 Filter ${index}: ${fieldName} -> aliases [${aliases.join(', ')}]`);
+
           let filterCondition = null;
-          
+
           if (operator === 'contains') {
-            // Simple string search with case insensitive regex - no boolean logic
-            filterCondition = {
-              [fieldName]: { 
-                $regex: searchValue, 
-                $options: 'i' // case insensitive
-              }
-            };
+            filterCondition = buildAliasedCondition(
+              fieldName,
+              { $regex: searchValue, $options: 'i' },
+              false
+            );
             console.log(`🔧 Filter ${index}: ${fieldName} contains "${searchValue}" (case insensitive)`);
           } else if (operator === 'not_contains') {
-            // Simple string negation with case insensitive regex
-            filterCondition = {
-              [fieldName]: { 
-                $not: { 
-                  $regex: searchValue, 
-                  $options: 'i' 
-                }
-              }
-            };
+            filterCondition = buildAliasedCondition(
+              fieldName,
+              { $not: { $regex: searchValue, $options: 'i' } },
+              true
+            );
             console.log(`🔧 Filter ${index}: ${fieldName} does not contain "${searchValue}" (case insensitive)`);
           } else if (operator === 'not_equals') {
-            // Exact value negation (case insensitive)
-            filterCondition = {
-              [fieldName]: { 
-                $not: { 
-                  $regex: `^${searchValue}$`, 
-                  $options: 'i' 
-                }
-              }
-            };
+            filterCondition = buildAliasedCondition(
+              fieldName,
+              { $not: { $regex: `^${searchValue}$`, $options: 'i' } },
+              true
+            );
             console.log(`🔧 Filter ${index}: ${fieldName} does not equal "${searchValue}" (case insensitive)`);
           } else if (operator === 'equals') {
-            // Exact value match (case insensitive)
-            filterCondition = {
-              [fieldName]: { 
-                $regex: `^${searchValue}$`, 
-                $options: 'i' 
-              }
-            };
+            filterCondition = buildAliasedCondition(
+              fieldName,
+              { $regex: `^${searchValue}$`, $options: 'i' },
+              false
+            );
             console.log(`🔧 Filter ${index}: ${fieldName} equals "${searchValue}" (case insensitive)`);
           }
-          
+
           if (filterCondition) {
             customFilterConditions.push(filterCondition);
           }
@@ -824,46 +863,45 @@ async function getMergedLogData(campId, cursor = null, limit = 100, isDownload =
       // Legacy single custom filter support (for backward compatibility)
       else if (filters.custom && filters.custom.field && filters.custom.value) {
         console.log(`🔧 Processing legacy single custom filter`);
-        
-        let fieldName = filters.custom.field;
+
+        const fieldName = filters.custom.field;
         const searchValue = filters.custom.value;
-        const operator = filters.custom.operator || 'contains'; // default to contains
-        
-        // Use field name as-is - no conversion needed
-        console.log(`🔧 Legacy filter: Using field name as-is: ${fieldName}`);
-        
+        const operator = filters.custom.operator || 'contains';
+        const aliases = getFieldAliases(fieldName);
+
+        console.log(`🔧 Legacy filter: ${fieldName} -> aliases [${aliases.join(', ')}]`);
+
+        let legacyCondition = null;
         if (operator === 'contains') {
-          // Simple string search with case insensitive regex - no boolean logic
-          query[fieldName] = { 
-            $regex: searchValue, 
-            $options: 'i' // case insensitive
-          };
-          console.log(`🔧 Legacy custom filter applied - ${fieldName} contains "${searchValue}" (case insensitive)`);
+          legacyCondition = buildAliasedCondition(
+            fieldName,
+            { $regex: searchValue, $options: 'i' },
+            false
+          );
         } else if (operator === 'not_contains') {
-          // Simple string negation with case insensitive regex
-          query[fieldName] = { 
-            $not: { 
-              $regex: searchValue, 
-              $options: 'i' 
-            }
-          };
-          console.log(`🔧 Legacy custom filter applied - ${fieldName} does not contain "${searchValue}" (case insensitive)`);
+          legacyCondition = buildAliasedCondition(
+            fieldName,
+            { $not: { $regex: searchValue, $options: 'i' } },
+            true
+          );
         } else if (operator === 'not_equals') {
-          // Exact value negation (case insensitive)
-          query[fieldName] = { 
-            $not: { 
-              $regex: `^${searchValue}$`, 
-              $options: 'i' 
-            }
-          };
-          console.log(`🔧 Legacy custom filter applied - ${fieldName} does not equal "${searchValue}" (case insensitive)`);
+          legacyCondition = buildAliasedCondition(
+            fieldName,
+            { $not: { $regex: `^${searchValue}$`, $options: 'i' } },
+            true
+          );
         } else if (operator === 'equals') {
-          // Exact value match (case insensitive)
-          query[fieldName] = { 
-            $regex: `^${searchValue}$`, 
-            $options: 'i' 
-          };
-          console.log(`🔧 Legacy custom filter applied - ${fieldName} equals "${searchValue}" (case insensitive)`);
+          legacyCondition = buildAliasedCondition(
+            fieldName,
+            { $regex: `^${searchValue}$`, $options: 'i' },
+            false
+          );
+        }
+
+        if (legacyCondition) {
+          if (!query.$and) query.$and = [];
+          query.$and.push(legacyCondition);
+          console.log(`🔧 Legacy custom filter applied: ${fieldName} ${operator} "${searchValue}"`);
         }
       }
     }

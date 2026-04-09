@@ -94,10 +94,19 @@ async function createPerformanceIndexes() {
       { background: true, name: "idx_hangup_campaignId_id_desc" }
     );
 
-    console.log('Creating compound index on plivoHangupData.campaignId for filtered queries...');
+    console.log('Creating compound index on plivoHangupData.campaignId for filtered queries (legacy Duration)...');
     await database.collection("plivoHangupData").createIndex(
       { campaignId: 1, Duration: 1, _id: -1 },
       { background: true, name: "idx_hangup_campaignId_duration_id" }
+    );
+
+    // Normalized docs use lowercase `duration` (int), not `Duration` (string).
+    // Add a matching compound index so duration-filtered report queries on
+    // normalized campaigns stay on an index instead of falling back to scan.
+    console.log('Creating compound index on plivoHangupData.campaignId + normalized duration...');
+    await database.collection("plivoHangupData").createIndex(
+      { campaignId: 1, duration: 1, _id: -1 },
+      { background: true, name: "idx_hangup_campaignId_normDuration_id" }
     );
 
     console.log('Creating sparse index on plivoHangupData for common filter fields...');
