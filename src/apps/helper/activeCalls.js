@@ -489,10 +489,50 @@ async function processSingleCall(callParams) {
 
   try {
     console.log(`🚀 Processing call: ${from} -> ${to} (Client: ${clientId})`);
-    
-    // Step 0: Lazy cleanup of stuck calls
+
+    // Step 0a: Centralized pre-call balance guard (covers all outbound paths: test, api, campaign, scheduled)
+    // Non-campaign sentinel values that are NOT real campaign ObjectIds
+    const NON_CAMPAIGN_IDS = ['testcall', 'api-call', 'scheduled-call'];
+    const isRealCampaign = campaignId && !NON_CAMPAIGN_IDS.includes(campaignId);
+
+    if (clientId) {
+      // Lazy require to avoid circular dependency with plivo.js
+      const { getCurrentClientBalance, pauseCampaign, updateCampaignPauseReason } = require('../plivo/plivo.js');
+      const balanceCheck = await getCurrentClientBalance(clientId);
+
+      if (!balanceCheck.success || (balanceCheck.balance || 0) <= 0) {
+        const currentBalance = balanceCheck.balance || 0;
+        console.log(`💰 Pre-call balance guard triggered: clientId=${clientId}, balance=${currentBalance}, campaignId=${campaignId}`);
+
+        // Auto-pause the campaign if this is a real campaign call
+        if (isRealCampaign) {
+          try {
+            const pauseResult = await pauseCampaign(campaignId);
+            if (pauseResult.success) {
+              await updateCampaignPauseReason(campaignId, 'insufficient_balance', currentBalance);
+              console.log(`⏸️ Campaign auto-paused due to insufficient balance: ${campaignId} (balance=${currentBalance})`);
+            } else {
+              // pauseCampaign rejects if already paused/completed/etc — that's fine, log and move on
+              console.log(`ℹ️ pauseCampaign skipped for ${campaignId}: ${pauseResult.error}`);
+            }
+          } catch (pauseErr) {
+            console.error(`❌ Failed to auto-pause campaign ${campaignId}:`, pauseErr);
+          }
+        }
+
+        return {
+          success: false,
+          error: balanceCheck.success ? 'insufficient_balance' : (balanceCheck.error || 'balance_check_failed'),
+          balance: currentBalance,
+          shouldPauseCampaign: isRealCampaign,
+          stage: 'balance_guard'
+        };
+      }
+    }
+
+    // Step 0b: Lazy cleanup of stuck calls
     await lazyCleanupStuckCalls();
-    
+
     // Step 1: Wait for concurrency slot
     const slotResult = await waitForSlot(clientId);
     if (!slotResult.success) {

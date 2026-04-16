@@ -448,6 +448,258 @@ async function updateCallAICredits(callUuid, aiCredits) {
   }
 }
 
+/**
+ * Self-healing campaign aggregation
+ * Finds campaigns in final states (completed/cancelled/failed) that haven't been billed to billingHistory,
+ * atomically claims each one via isBalanceUpdated flag, aggregates from callBillingDetails,
+ * and writes a single billingHistory entry per campaign.
+ *
+ * Idempotent and concurrent-safe: the atomic findOneAndUpdate on isBalanceUpdated is the lock.
+ *
+ * @param {string} clientId - Client ID to reconcile
+ * @returns {Object} Result with number of campaigns reconciled
+ */
+async function reconcileFinishedCampaigns(clientId) {
+  try {
+    await connectToMongo();
+    const database = client.db("talkGlimpass");
+    const campaignCollection = database.collection("plivoCampaign");
+    const callBillingCollection = database.collection("callBillingDetails");
+    const billingHistoryCollection = database.collection("billingHistory");
+    const clientCollection = database.collection("client");
+
+    // Find candidate campaigns: final state AND not yet billed to history
+    const candidates = await campaignCollection.find({
+      clientId: clientId.toString(),
+      status: { $in: ['completed', 'cancelled', 'failed'] },
+      isBalanceUpdated: { $ne: true }
+    }).toArray();
+
+    if (candidates.length === 0) {
+      return { success: true, reconciledCount: 0, entries: [] };
+    }
+
+    console.log(`🔄 Reconciling ${candidates.length} finalized campaign(s) for client ${clientId}`);
+
+    const reconciled = [];
+
+    for (const campaign of candidates) {
+      const campaignIdStr = campaign._id.toString();
+
+      // Atomic claim — only one concurrent caller wins
+      const claim = await campaignCollection.findOneAndUpdate(
+        { _id: campaign._id, isBalanceUpdated: { $ne: true } },
+        {
+          $set: {
+            isBalanceUpdated: true,
+            billingProcessedAt: new Date()
+          }
+        },
+        { returnDocument: 'after' }
+      );
+
+      if (!claim) {
+        console.log(`ℹ️ Campaign ${campaignIdStr} already claimed by another request - skipping`);
+        continue;
+      }
+
+      // Aggregate from callBillingDetails (authoritative per-call ground truth)
+      const aggPipeline = [
+        {
+          $match: {
+            clientId: clientId.toString(),
+            campaignId: campaignIdStr,
+            type: 'campaign'
+          }
+        },
+        {
+          $group: {
+            _id: null,
+            totalCalls: { $sum: 1 },
+            totalCredits: { $sum: '$credits' },
+            totalDuration: { $sum: '$duration' },
+            startTime: { $min: '$timestamp' },
+            endTime: { $max: '$timestamp' }
+          }
+        }
+      ];
+
+      const [agg] = await callBillingCollection.aggregate(aggPipeline).toArray();
+      const totalCalls = agg ? agg.totalCalls : 0;
+      const totalCredits = agg ? Math.round(agg.totalCredits || 0) : 0;
+      const totalDuration = agg ? (agg.totalDuration || 0) : 0;
+
+      // Fetch current client balance for the entry's snapshot (balance was already deducted per-call)
+      const clientDoc = await clientCollection.findOne(
+        { _id: new ObjectId(clientId) },
+        { projection: { availableBalance: 1 } }
+      );
+      const currentBalance = clientDoc ? (clientDoc.availableBalance || 0) : 0;
+
+      const statusLabel = campaign.status === 'completed'
+        ? 'completed'
+        : campaign.status === 'cancelled'
+          ? 'cancelled'
+          : 'failed';
+
+      const desc = `Campaign ${statusLabel}: ${campaign.campaignName} - ${totalCalls} calls, ${totalDuration} seconds total`;
+
+      const billingEntry = {
+        clientId: clientId.toString(),
+        camp_name: campaign.campaignName,
+        campaignId: campaignIdStr,
+        balanceCount: -totalCredits,
+        date: campaign.completedAt || campaign.pausedAt || new Date(),
+        desc,
+        transactionType: 'Dr',
+        newAvailableBalance: currentBalance,
+        callUUID: null,
+        callDuration: totalDuration,
+        callType: 'campaign_aggregate',
+        from: null,
+        to: null,
+        aggregationPeriod: agg ? {
+          startTime: agg.startTime,
+          endTime: agg.endTime,
+          totalCalls,
+          totalDuration
+        } : null
+      };
+
+      const insertResult = await billingHistoryCollection.insertOne(billingEntry);
+
+      // Store the billingEntryId back on the campaign for future traceability
+      await campaignCollection.updateOne(
+        { _id: campaign._id },
+        { $set: { billingEntryId: insertResult.insertedId } }
+      );
+
+      console.log(`✅ Reconciled campaign ${campaignIdStr} (${statusLabel}): ${totalCalls} calls, ${totalCredits} credits → billingHistory ${insertResult.insertedId}`);
+
+      reconciled.push({
+        campaignId: campaignIdStr,
+        campaignName: campaign.campaignName,
+        status: campaign.status,
+        totalCalls,
+        totalCredits,
+        totalDuration,
+        billingEntryId: insertResult.insertedId.toString()
+      });
+    }
+
+    return { success: true, reconciledCount: reconciled.length, entries: reconciled };
+
+  } catch (error) {
+    console.error('❌ Error reconciling finished campaigns:', error);
+    return { success: false, error: error.message, reconciledCount: 0, entries: [] };
+  }
+}
+
+/**
+ * Compute virtual "live" rows for campaigns still in progress.
+ * These are NOT persisted — they're computed at read time from callBillingDetails
+ * and merged into the response so users can see credits-spent-so-far in Transaction History.
+ *
+ * When the campaign transitions to a final state, reconcileFinishedCampaigns picks it up
+ * and writes a persistent entry; the status filter here then excludes it → no duplicate rows.
+ *
+ * @param {string} clientId - Client ID
+ * @returns {Array} Array of virtual billingHistory-shaped entries (with isLive: true flag)
+ */
+async function computeRunningCampaignRows(clientId) {
+  try {
+    await connectToMongo();
+    const database = client.db("talkGlimpass");
+    const campaignCollection = database.collection("plivoCampaign");
+    const callBillingCollection = database.collection("callBillingDetails");
+    const clientCollection = database.collection("client");
+
+    // Campaigns currently in progress (not yet eligible for reconciliation)
+    const runningCampaigns = await campaignCollection.find({
+      clientId: clientId.toString(),
+      status: { $in: ['running', 'paused', 'scheduled'] }
+    }).toArray();
+
+    if (runningCampaigns.length === 0) return [];
+
+    // Fetch current client balance once — used as an anchor value on the most recent live row.
+    // (The Bills UI reads newAvailableBalance for the "Balance" column; null would display as 0.)
+    const clientDoc = await clientCollection.findOne(
+      { _id: new ObjectId(clientId) },
+      { projection: { availableBalance: 1 } }
+    );
+    const currentBalance = clientDoc ? (clientDoc.availableBalance || 0) : 0;
+
+    const rows = [];
+
+    for (const campaign of runningCampaigns) {
+      const campaignIdStr = campaign._id.toString();
+
+      const aggPipeline = [
+        {
+          $match: {
+            clientId: clientId.toString(),
+            campaignId: campaignIdStr,
+            type: 'campaign'
+          }
+        },
+        {
+          $group: {
+            _id: null,
+            totalCalls: { $sum: 1 },
+            totalCredits: { $sum: '$credits' },
+            totalDuration: { $sum: '$duration' },
+            lastCallAt: { $max: '$timestamp' }
+          }
+        }
+      ];
+
+      const [agg] = await callBillingCollection.aggregate(aggPipeline).toArray();
+      const totalCalls = agg ? agg.totalCalls : 0;
+      const totalCredits = agg ? Math.round(agg.totalCredits || 0) : 0;
+      const totalDuration = agg ? (agg.totalDuration || 0) : 0;
+      const lastCallAt = agg ? agg.lastCallAt : null;
+
+      // Skip campaigns with zero completed calls so far — nothing to show
+      if (totalCalls === 0) continue;
+
+      const pauseSuffix = campaign.status === 'paused' && campaign.pauseReason === 'insufficient_balance'
+        ? ' (paused: insufficient balance)'
+        : '';
+
+      const desc = `Campaign ${campaign.status}: ${campaign.campaignName} - ${totalCalls} calls so far, ${totalDuration} seconds${pauseSuffix}`;
+
+      rows.push({
+        _id: `live-${campaignIdStr}`,          // synthetic id; prefixed so React keys & backend lookups can't collide
+        clientId: clientId.toString(),
+        camp_name: campaign.campaignName,
+        campaignId: campaignIdStr,
+        balanceCount: -totalCredits,
+        date: lastCallAt || campaign.lastActivity || campaign.createdAt || new Date(),
+        desc,
+        transactionType: 'Dr',
+        newAvailableBalance: currentBalance,   // anchor with current live balance (SSE updates it in real-time)
+        callUUID: null,
+        callDuration: totalDuration,
+        callType: 'campaign_live',
+        from: null,
+        to: null,
+        isLive: true,                           // flag for any UI that wants to style live rows distinctly
+        campaignStatus: campaign.status
+      });
+    }
+
+    // Sort newest-first so the freshest running campaign is at the top when prepended
+    rows.sort((a, b) => new Date(b.date) - new Date(a.date));
+
+    return rows;
+
+  } catch (error) {
+    console.error('❌ Error computing running campaign rows:', error);
+    return [];
+  }
+}
+
 module.exports = {
   saveCallBillingDetail,
   updateClientBalance,
@@ -455,5 +707,7 @@ module.exports = {
   needsIncomingAggregation,
   aggregateIncomingCallsSince,
   saveAggregationToBillingHistory,
-  updateCallAICredits
+  updateCallAICredits,
+  reconcileFinishedCampaigns,
+  computeRunningCampaignRows
 };

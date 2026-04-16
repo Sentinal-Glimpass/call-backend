@@ -320,53 +320,20 @@ async function addCampaignDataInMongo(campaignId, responseFromCamp, clientId){
   try {
     await connectToMongo();
 
-    // Perform MongoDB operations here using the client object
+    // Duplicate prevention is now enforced upstream via atomic locks:
+    //   - Per-call entries: idempotency check on callUUID+callType before insert (plivoRouter)
+    //   - Campaign aggregate entries: atomic isBalanceUpdated flag in reconcileFinishedCampaigns
+    // So we no longer need the fragile substring-based dedup.
     const database = client.db("talkGlimpass");
     const collection = database.collection("billingHistory");
 
-    // Find all billing history documents for the given clientId
-    const billingHistory = await collection.find({ clientId: clientId }).toArray();
-    const reversedbillingHistory = billingHistory.reverse();
+    // Most recent first
+    const billingHistory = await collection
+      .find({ clientId: clientId })
+      .sort({ date: -1 })
+      .toArray();
 
-    // DUPLICATE REMOVAL: Remove duplicate campaign billing entries
-    // Look for text between ":" and "-" and check if campaign name + balance are same
-    if (reversedbillingHistory && reversedbillingHistory.length > 0) {
-      const deduplicatedHistory = [];
-      const seenEntries = new Set();
-      
-      for (const entry of reversedbillingHistory) {
-        // Extract campaign name from desc field (text between ":" and "-")
-        let campaignKey = null;
-        if (entry.desc && entry.desc.includes(':') && entry.desc.includes('-')) {
-          const colonIndex = entry.desc.indexOf(':');
-          const dashIndex = entry.desc.indexOf('-', colonIndex);
-          if (dashIndex > colonIndex) {
-            const campaignName = entry.desc.substring(colonIndex + 1, dashIndex).trim();
-            // Create unique key: campaignName + newAvailableBalance
-            campaignKey = `${campaignName}_${entry.newAvailableBalance}`;
-          }
-        }
-        
-        // If we extracted a campaign key, check for duplicates
-        if (campaignKey) {
-          if (!seenEntries.has(campaignKey)) {
-            seenEntries.add(campaignKey);
-            deduplicatedHistory.push(entry);
-            console.log(`✅ Keeping billing entry: ${campaignKey}`);
-          } else {
-            console.log(`🗑️ Removing duplicate billing entry: ${campaignKey}`);
-          }
-        } else {
-          // Non-campaign entries (incoming calls, payments, etc.) - keep all
-          deduplicatedHistory.push(entry);
-        }
-      }
-      
-      console.log(`🔍 Billing deduplication: ${reversedbillingHistory.length} -> ${deduplicatedHistory.length} entries (removed ${reversedbillingHistory.length - deduplicatedHistory.length} duplicates)`);
-      return deduplicatedHistory;
-    }
-
-    return reversedbillingHistory || [];
+    return billingHistory || [];
 
   } catch (error) {
     console.error("Error running MongoDB queries:", error);

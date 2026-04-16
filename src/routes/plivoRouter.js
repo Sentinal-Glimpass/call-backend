@@ -2057,20 +2057,46 @@ router.post('/hangup-url', async (req, res) => {
         if (existingHangup) {
           console.log(`⚠️ Call ${hangupData.CallUUID} already processed - skipping balance update to prevent double deduction`);
           // Skip to end - hangup data already exists, no billing needed
+        } else if (duration === 0) {
+          // 0-second calls (ring-no-answer, immediate hangups): track for visibility, skip billing
+          console.log(`⏭️ Skipping billing for 0-second call ${hangupData.CallUUID} (Type: ${callType}) - no charge, no entries`);
+          await saveCallBillingDetail({
+            clientId: clientId,
+            callUuid: hangupData.CallUUID,
+            duration: 0,
+            type: callType,
+            from: hangupData.From,
+            to: hangupData.To,
+            credits: 0,
+            aiCredits: 0,
+            telephonyCredits: 0,
+            campaignId: callType === 'campaign' ? hangupData.campId : null,
+            campaignName: callType === 'campaign' ? `Campaign ${hangupData.campId}` : null
+          });
         } else {
           // Fresh call - proceed with billing
-          const currentBalance = existingClient.availableBalance || 0;
-          const newBalance = currentBalance - creditsToDeduct;
-
           console.log(`💰 NEW Billing: ${callType} call - ${creditsToDeduct} credits (duration: ${duration}s)`);
-          console.log(`💰 Current Balance: ${currentBalance}`);
-          console.log(`💰 Processing call billing: ${currentBalance} -> ${newBalance}`);
 
-          // Update client balance immediately for ALL calls (real-time balance updates)
-          await clientCollection.updateOne(
+          // ATOMIC balance deduction using $inc (prevents concurrent-hangup race condition)
+          // Before: read balance → compute newBalance → $set (2 ops, not atomic, loses deductions under concurrency)
+          // After: single $inc op is atomic at the MongoDB operator level
+          const updatedClient = await clientCollection.findOneAndUpdate(
             { _id: new ObjectId(clientId) },
-            { $set: { availableBalance: newBalance } }
+            {
+              $inc: { availableBalance: -creditsToDeduct },
+              $set: { lastBalanceUpdate: new Date() }
+            },
+            { returnDocument: 'after' }
           );
+
+          if (!updatedClient) {
+            console.error(`❌ Atomic balance deduction failed - client not found: ${clientId}`);
+            throw new Error(`Client not found during balance update: ${clientId}`);
+          }
+
+          const newBalance = updatedClient.availableBalance;
+          const previousBalance = newBalance + creditsToDeduct;
+          console.log(`💰 Atomic balance update: ${previousBalance} -> ${newBalance}`);
 
         // Broadcast balance update via SSE for ALL calls (including campaign calls)
         if (billingRouter.broadcastBalanceUpdate) {

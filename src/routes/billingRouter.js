@@ -1,10 +1,12 @@
 const express = require('express');
 const router = express.Router();
-const { 
+const {
   getCallDetails,
   needsIncomingAggregation,
   aggregateIncomingCallsSince,
-  saveAggregationToBillingHistory
+  saveAggregationToBillingHistory,
+  reconcileFinishedCampaigns,
+  computeRunningCampaignRows
 } = require('../apps/billing/billingCore');
 const { 
   getClientByClientId
@@ -339,23 +341,55 @@ router.get('/aggregated/:clientId', authenticateToken, validateResourceOwnership
       }
     }
     
-    // Get updated billing history (returns array directly)
+    // Self-healing campaign reconciliation: find finalized-but-unbilled campaigns and write
+    // a single billingHistory entry for each. Idempotent via atomic isBalanceUpdated lock.
+    let campaignReconcileSummary = null;
+    try {
+      const reconcileResult = await reconcileFinishedCampaigns(clientId);
+      if (reconcileResult.success && reconcileResult.reconciledCount > 0) {
+        console.log(`✅ Reconciled ${reconcileResult.reconciledCount} finished campaign(s) for client ${clientId}`);
+        campaignReconcileSummary = {
+          reconciledCount: reconcileResult.reconciledCount,
+          entries: reconcileResult.entries
+        };
+      }
+    } catch (reconcileErr) {
+      console.error('❌ Campaign reconciliation failed (non-fatal):', reconcileErr);
+    }
+
+    // Get persisted billing history (returns array directly)
     console.log(`🔍 Debug: Fetching billing history for clientId: ${clientId}`);
-    const billingHistory = await getBillingHistoryByClientId(clientId);
+    const persistedHistory = await getBillingHistoryByClientId(clientId);
     console.log(`🔍 Debug: Retrieved billing history:`, {
-      type: typeof billingHistory,
-      isArray: Array.isArray(billingHistory), 
-      length: Array.isArray(billingHistory) ? billingHistory.length : 'N/A',
-      firstItem: Array.isArray(billingHistory) && billingHistory.length > 0 ? billingHistory[0] : 'N/A'
+      type: typeof persistedHistory,
+      isArray: Array.isArray(persistedHistory),
+      length: Array.isArray(persistedHistory) ? persistedHistory.length : 'N/A',
+      firstItem: Array.isArray(persistedHistory) && persistedHistory.length > 0 ? persistedHistory[0] : 'N/A'
     });
-    
+
+    // Compute live virtual rows for running / paused / scheduled campaigns (not persisted)
+    let liveCampaignRows = [];
+    try {
+      liveCampaignRows = await computeRunningCampaignRows(clientId);
+      if (liveCampaignRows.length > 0) {
+        console.log(`📡 Injecting ${liveCampaignRows.length} live campaign row(s) at top of billing history`);
+      }
+    } catch (liveErr) {
+      console.error('❌ Failed to compute running campaign rows (non-fatal):', liveErr);
+    }
+
+    // Merge: live rows on top, then persisted history
+    const persistedArr = Array.isArray(persistedHistory) ? persistedHistory : [];
+    const combinedHistory = [...liveCampaignRows, ...persistedArr];
+
     res.json({
       success: true,
-      billingHistory: Array.isArray(billingHistory) ? billingHistory : [],
+      billingHistory: combinedHistory,
       aggregationPerformed,
       aggregationDetails,
+      campaignReconcileSummary,
       lastAggregationCheck: aggregationCheck.lastAggregationTime,
-      nextAggregationAvailable: aggregationCheck.lastAggregationTime 
+      nextAggregationAvailable: aggregationCheck.lastAggregationTime
         ? new Date(aggregationCheck.lastAggregationTime.getTime() + aggregationCheck.thresholdTime)
         : null
     });
